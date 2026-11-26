@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """声音功能的检查（按真实时间跑，不走 virtual-time，因为音频解码需要真实时间）。
 
-检查项：
-  1. 预加载：页面加载后两个音频都已取到并解码
+当前声音只有背景乐（翻页音效已于 2026-11-26 移除），检查项：
+  1. 预加载：页面加载后背景乐已取到并解码（musicDur 应为 64）
   2. 首次交互：上下文恢复、背景乐起播（总线有信号）
-  3. 翻页声：点一次下一声、连点三下最多两声（不叠加）
-  4. 静音：总线增益归零、翻页不再出声、localStorage 记住
-  5. 刷新后沿用上次的开关
+  3. 翻页不发声：连续翻页时总线电平保持在背景乐水平，不出现尖峰
+  4. 静音：总线增益归零、RMS 归零、localStorage 记住
+  5. 刷新后沿用上次的开关；再点一次可恢复
   6. file:// 下自动退回 <audio> 元素通道（离线压缩包场景）
 
 用法：
@@ -14,6 +14,7 @@
   python tools/probe_sound.py --file
 """
 import http.server
+import json
 import os
 import shutil
 import socketserver
@@ -72,20 +73,18 @@ def main():
         b.wait(2.0)
         show('点击后', b)
 
-        b.js("document.getElementById('btn-next').click()")
-        b.wait(1.6)
-        show('翻一页', b)
-
-        b.js("""['btn-next','btn-next','btn-next'].forEach(function(id){
-                  document.getElementById(id).click(); });""")
-        b.wait(2.4)
-        show('连点三下', b)
-
-        # 翻页声的瞬时峰值：翻页后立刻量一次
-        b.js("document.getElementById('btn-next').click()")
-        b.wait(0.12)
-        print('%-10s %s' % ('翻页瞬间', b.js(STATUS)))
-        b.wait(1.4)
+        # 翻页不发声：连续翻四页，逐次量"翻页瞬间"的总线电平，
+        # 只要不比背景乐本身高出一截，就说明没有额外的音效混进来。
+        base = json.loads(b.js("JSON.stringify(BookAudio.level())"))['rms']
+        peaks = []
+        for i in range(4):
+            b.js("document.getElementById('btn-next').click()")
+            b.wait(0.12)
+            peaks.append(json.loads(b.js("JSON.stringify(BookAudio.level())"))['rms'])
+            b.wait(0.9)
+        print('%-10s 背景 %0.4f  翻页四次 %s' % (
+            '翻页电平', base, ' '.join('%0.4f' % v for v in peaks)))
+        show('翻四页后', b)
 
         b.js("document.getElementById('btn-sound').click()")
         b.wait(0.6)

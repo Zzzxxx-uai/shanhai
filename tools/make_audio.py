@@ -1,15 +1,27 @@
 # -*- coding: utf-8 -*-
-"""生成绘本用的两个音频素材（纯程序合成，无版权问题）：
+"""生成绘本用的背景音乐素材（纯程序合成，无版权问题）：
 
-  assets/audio/page-flip.mp3   翻书声（纸张沙沙），约 0.6s，单声道
   assets/audio/bgm.mp3/.ogg    背景纯音乐，64s 无缝循环，单声道
 
-做法：
-  · 翻书声 = 若干短促的带通噪声颗粒（纸纤维摩擦）+ 一段更宽的"哗"声 + 极轻的低频气流，
-    高频做过柔化（11kHz 以上滚降），听感轻而不刺。
-  · 背景乐 = 古琴式拨弦（谐波叠加 + 指数衰减）+ 缓慢铺底和声垫 + 低音持续音，
-    五声音阶（D 宫），60BPM，16 小节；末尾混响尾巴折回开头，循环处不断裂。
+风格：古风纯音乐 —— 一床古琴，一支箫，一阵空谷回响。
+
+  · 古琴：谐波按"拨弦位置"梳状加权（越靠岳山拨越亮），
+    高次谐波衰减更快，起音有极短的上滑（弦被拉紧后回落），
+    句尾可带"走手"滑音；低音区用更长的余韵当散音。
+  · 箫：正弦为骨，加二次谐波与气息噪声，缓起音、
+    从下方约 40 音分"绰"上来，长音带轻微颤音，句尾可"注"下去。
+  · 低音：极轻的 D2 持续音，只做"地"，不抢旋律。
+  · 空间：3.6s 指数衰减噪声混响，压低高频，像在空堂里弹。
+  · 结构：引子（散落几粒）→ 第一句 → 第二句（抬高、箫来对答）→ 收束回落，
+    每句之间留白，是古琴曲的呼吸方式。
+
+无缝循环：全曲 64s，渲染三遍取中间一遍——开头带着上一遍的余响，
+结尾的余响也被第三遍接住，切片即循环，不需要折叠尾巴。
+持续音（drone）频率对齐到 1/64Hz 栅格，保证跨循环点相位连续。
+
 编码用 ffmpeg（libmp3lame / libvorbis），体积小、浏览器原生支持。
+
+注：翻页音效（page-flip.mp3）已于 2026-11-26 按要求移除，此脚本不再生成它。
 
 用法：python tools/make_audio.py
 """
@@ -54,6 +66,18 @@ def fade(x, sr, attack=0.005, release=0.02):
     return x
 
 
+def env_ar(n, attack, release, sr=32000):
+    """线性/S 形起落包络，两端只在需要时生效。"""
+    env = np.ones(n)
+    a = min(int(attack * sr), n // 2)
+    r = min(int(release * sr), n // 2)
+    if a > 0:
+        env[:a] = np.linspace(0.0, 1.0, a) ** 0.55
+    if r > 0:
+        env[-r:] = np.linspace(1.0, 0.0, r) ** 0.8
+    return env
+
+
 def rms(x):
     return float(np.sqrt(np.mean(x ** 2)))
 
@@ -79,59 +103,12 @@ def encode(src_wav, dst, codec_args):
 
 
 # --------------------------------------------------------------------------- #
-# 一、翻书声
-# --------------------------------------------------------------------------- #
-def make_page_flip():
-    sr = 44100
-    dur = 0.62
-    n = int(dur * sr)
-    t = np.arange(n) / sr
-    out = np.zeros(n)
-
-    # 1) 纸纤维的细碎摩擦：一串短颗粒，前密后疏
-    grains = 16
-    for i in range(grains):
-        # 起始时刻集中在 0~0.26s，越往后越稀
-        p = i / (grains - 1.0)
-        start = (p ** 1.6) * 0.30 + rng.uniform(-0.012, 0.012)
-        start = max(0.0, start)
-        glen = int(rng.uniform(0.012, 0.045) * sr)
-        a = int(start * sr)
-        if a + glen >= n:
-            continue
-        g = rng.standard_normal(glen)
-        center = rng.uniform(1700, 5200)
-        g = fft_filter(g, sr, lo=center * 0.6, hi=center * 1.6, order=2)
-        env = np.hanning(glen) ** 1.2
-        amp = rng.uniform(0.25, 0.75) * (1.0 - 0.55 * p)
-        out[a:a + glen] += g * env * amp
-
-    # 2) 整张纸离页的"哗"：一段宽带噪声，起得快、尾稍长
-    sw = rng.standard_normal(n)
-    sw = fft_filter(sw, sr, lo=600, hi=6500, order=2)
-    env = np.exp(-t / 0.16) * (1.0 - np.exp(-t / 0.012))
-    out += sw * env * 0.55
-
-    # 3) 纸面带走的气流：低频给"厚度"，300–900Hz 一点"沙"的质感
-    air = rng.standard_normal(n)
-    air = fft_filter(air, sr, lo=90, hi=900, order=2)
-    out += air * np.exp(-t / 0.10) * (1.0 - np.exp(-t / 0.02)) * 0.34
-
-    # 4) 柔化：去掉齿音与次声，11kHz 以上滚降——"不刺耳"的关键
-    out = fft_filter(out, sr, lo=150, hi=7800, order=3)
-    out = fade(out, sr, 0.004, 0.06)
-
-    out *= 0.72 / max(1e-9, np.max(np.abs(out)))
-    return out, sr
-
-
-# --------------------------------------------------------------------------- #
-# 二、背景纯音乐
+# 二、背景纯音乐：古琴 + 箫
 # --------------------------------------------------------------------------- #
 SR = 32000
-BEAT = 1.0                 # 60 BPM
+BEAT = 1.0                 # 一拍 1 秒（60 BPM）
 LOOP = 64.0                # 16 小节 × 4 拍
-TAIL = 3.0
+CYCLES = 3
 
 
 def midi_hz(m):
@@ -149,145 +126,221 @@ def add(buf, x, start_s, sr=SR):
     buf[a:e] += x[:e - a]
 
 
-def pluck(midi, dur=2.4, vel=0.4, bright=1.0):
-    """模拟古琴/古筝的拨弦：谐波叠加 + 各自指数衰减 + 极短的起振噪声。"""
+def qin(midi, vel=0.4, slide=0.0, pos=None, dur=None, bright=1.0, vib=None):
+    """古琴拨弦。
+
+    pos   拨弦点占弦长的比例：越靠近岳山（小）音色越亮、越高亢；
+          0.5 处拨只有偶次谐波，正好是古琴的"泛音"。
+    slide 走手滑音，正为上、负为下（约 ±0.012 即一个小二度左右）。
+    vib   吟猱：长音上极轻的音高游移，是琴与电子音最大的分别。
+    dur   不给就按余韵自然长度走（低音更长）。
+    """
+    f0 = midi_hz(midi) * rng.uniform(0.9992, 1.0009)
+
+    # 余韵：低音区一床好琴能响七八秒，高音区短得多
+    tau0 = 0.60 + 2.35 * (1.0 - min(1.0, max(0.0, (midi - 43) / 42.0)))
+    if dur is None:
+        dur = min(6.5, tau0 * 3.6)
+    n = int(dur * SR)
+    t = np.arange(n) / SR
+
+    # 频率轨迹：起音略高（弦被拨紧），0.18s 内回落；之后是滑音
+    settle = 0.0032 * np.exp(-t / 0.18)
+    bend = slide * np.clip((t - 0.30) / 0.85, 0.0, 1.0) ** 1.5
+    freq = f0 * (1.0 + settle + bend)
+    if vib is None:
+        vib = 0.0042 if midi < 68 else 0.0026
+    if vib:
+        # 慢起、慢慢收的游移，像指腹在弦上揉，不是机器颤音
+        freq = freq * (1.0 + vib * np.sin(2 * np.pi * 4.3 * t + rng.uniform(0, 6.28))
+                       * np.clip((t - 0.45) / 0.9, 0.0, 1.0) * np.exp(-t / 3.2))
+    phase = 2.0 * np.pi * np.cumsum(freq) / SR
+    # 第二根弦：比第一根高约 0.13%，两根一起响会有极慢的拍，
+    # 这是真琴才有的"活气"，纯加法合成怎么调参数都做不出来
+    phase2 = 2.0 * np.pi * np.cumsum(freq * 1.0013) / SR
+
+    if pos is None:
+        pos = 0.15 if midi < 70 else 0.21        # 高音稍稍靠里，免得发尖
+
+    x = np.zeros(n)
+    kmax = min(20, int(SR * 0.45 / f0))
+    for k in range(1, kmax + 1):
+        amp = abs(np.sin(np.pi * k * pos)) / k ** 1.10
+        if k > 1:
+            amp *= bright ** (0.55 * (k - 1) ** 0.6)
+        tau = tau0 / (1.0 + 0.60 * (k - 1) ** 0.85)
+        dec = amp * np.exp(-t / tau)
+        x += dec * np.sin(k * phase + rng.uniform(0.0, 6.2832))
+        if k <= 10:
+            x += dec * 0.38 * np.sin(k * phase2 + rng.uniform(0.0, 6.2832))
+
+    # 指甲擦弦的一瞬（很轻，只让音头立得住）
+    an = int(0.025 * SR)
+    if an < n:
+        atk = fft_filter(rng.standard_normal(an) * np.hanning(an), SR,
+                         lo=900, hi=5200)
+        x[:an] += atk * (0.070 if pos < 0.4 else 0.024)
+
+    x /= max(1e-9, np.max(np.abs(x)))
+    return fade(x * vel, SR, 0.0015, 0.06)
+
+
+def xiao(midi, dur=4.0, vel=0.16, bend=0.0, entry=0.022):
+    """箫：气息为主。缓起音，从下方 entry 处"绰"上来，长音带极轻颤音。"""
     f0 = midi_hz(midi) * rng.uniform(0.9985, 1.0015)
     n = int(dur * SR)
     t = np.arange(n) / SR
-    # (倍数, 幅度, 衰减时间)：越高的谐波衰减越快，听感才像弦不像风琴
-    parts = [(1.0, 1.00, 0.62), (2.0, 0.34, 0.40), (3.0, 0.16, 0.26),
-             (4.01, 0.09, 0.17), (5.42, 0.05, 0.12)]
-    x = np.zeros(n)
-    for k, (mult, amp, tau) in enumerate(parts):
-        if f0 * mult > SR * 0.45:
-            break
-        if k > 0:
-            amp *= bright
-        x += amp * np.exp(-t / tau) * np.sin(2 * np.pi * f0 * mult * t + rng.uniform(0, 6.28))
-    # 拨片擦弦的瞬间（很轻，只为让音头清楚）
-    an = int(0.02 * SR)
-    if an < n:
-        atk = rng.standard_normal(an) * np.hanning(an)
-        atk = fft_filter(atk, SR, lo=1200, hi=6000)
-        x[:an] += atk * 0.05
-    return fade(x * vel, SR, 0.002, 0.05)
+
+    slide_in = -entry * np.exp(-t / 0.26)                       # 起音偏低后稳住
+    vib = 1.0 + 0.0045 * np.sin(2 * np.pi * 5.1 * t + rng.uniform(0, 6.28)) \
+        * np.clip((t - 0.45) / 1.1, 0.0, 1.0)                   # 颤音慢慢进来
+    tail = bend * np.clip((t - dur * 0.62) / max(0.3, dur * 0.34), 0.0, 1.0) ** 1.6
+    freq = f0 * vib * (1.0 + slide_in + tail)
+    phase = 2.0 * np.pi * np.cumsum(freq) / SR
+
+    x = np.sin(phase) + 0.20 * np.sin(2 * phase + 0.35) + 0.07 * np.sin(3 * phase + 1.2)
+    breath = fft_filter(rng.standard_normal(n), SR, lo=1300, hi=6800)
+    breath *= 0.30 + 0.70 * np.exp(-t / 0.85)                   # 气声在音头最多
+    x = x + breath * 0.42
+
+    x /= max(1e-9, np.max(np.abs(x)))
+    return x * env_ar(n, 0.50, min(1.4, dur * 0.45)) * vel
 
 
-def pad(midi, start_s, dur_s, amp=0.1, attack=2.5, release=2.5):
-    """和声垫：只用 1/2/3 次谐波，频率对齐到循环长度的整数分之一，
-    保证整段在 64s 处相位连续（循环点听不出接缝）。
-    包络用 sqrt 形，两块垫音交叠时功率大致恒定，换和弦不会"塌"下去。"""
-    f = midi_hz(midi)
-    f = round(f * LOOP) / LOOP           # 对齐到 1/64Hz 的栅格
-    n = int(dur_s * SR)
+def drone(midi, dur, amp, attack=2.5, release=2.5):
+    """低音持续音：提供"地"。频率对齐 1/64Hz，跨循环点相位连续。"""
+    f = round(midi_hz(midi) * LOOP) / LOOP
+    n = int(dur * SR)
     t = np.arange(n) / SR
-    x = np.sin(2 * np.pi * f * t)
-    x += 0.22 * np.sin(2 * np.pi * 2 * f * t + 0.6)
-    x += 0.07 * np.sin(2 * np.pi * 3 * f * t + 1.7)
-    # 极慢的呼吸，让长音不呆板
-    x *= 1.0 + 0.10 * np.sin(2 * np.pi * t / 11.0 + rng.uniform(0, 6.28))
-    env = np.ones(n)
-    a = min(int(attack * SR), n // 2)
-    r = min(int(release * SR), n // 2)
-    env[:a] = np.linspace(0, 1, a) ** 0.5
-    env[-r:] = np.linspace(1, 0, r) ** 0.5
-    return x * env * amp
+    x = np.sin(2 * np.pi * f * t) + 0.17 * np.sin(4 * np.pi * f * t + 0.8)
+    x *= 1.0 + 0.12 * np.sin(2 * np.pi * t / 13.0 + rng.uniform(0, 6.28))   # 慢呼吸
+    return x * env_ar(n, attack, release) * amp
 
 
+# 五声 D 宫：D E F# A B。旋律只在五声里走，是"古"的第一层。
+# (拍, 音高, 力度, 滑音)
 MELODY = [
-    # 引子（第 1–4 小节）只点几粒音，把空间让给和声
-    (2.0, 62, 0.26), (6.0, 69, 0.22), (10.0, 66, 0.20), (13.5, 64, 0.18),
-    # 第一句
-    (16.0, 69, 0.46), (18.0, 66, 0.38), (19.5, 64, 0.34),
-    (21.0, 62, 0.46), (22.5, 64, 0.30), (24.0, 66, 0.40),
-    (26.0, 69, 0.38), (28.0, 71, 0.33), (30.0, 69, 0.28), (31.5, 66, 0.26),
-    # 第二句（抬高一点）
-    (32.0, 74, 0.40), (34.0, 71, 0.35), (35.5, 69, 0.30),
-    (37.0, 66, 0.34), (38.5, 64, 0.28), (40.0, 62, 0.42),
-    (42.0, 64, 0.30), (43.5, 66, 0.33), (45.0, 69, 0.35), (47.0, 74, 0.28),
-    # 收束
-    (48.0, 66, 0.34), (50.0, 64, 0.28), (51.5, 62, 0.34),
-    (53.0, 50, 0.38), (56.0, 69, 0.30), (58.0, 66, 0.26),
-    (60.0, 64, 0.25), (62.0, 62, 0.28), (63.0, 57, 0.24),
+    # 引子（第 1–4 小节）—— 散落几粒，把时间留给余响
+    (0.0,  50, 0.34, 0.0),      # D3 散音，一声就把场子定住
+    (2.2,  74, 0.15, 0.0),      # D5 泛音（高中音区轻点）
+    (5.4,  69, 0.30, 0.008),    # A4，绰上去
+    (7.8,  66, 0.26, -0.007),   # F#4，注下来
+    (10.4, 64, 0.24, 0.0),
+    (13.2, 62, 0.28, -0.008),
+    (14.6, 74, 0.12, 0.0),
+
+    # 第一句：从 A 起，缓缓落回 D
+    (16.0, 69, 0.44, 0.0),
+    (17.6, 71, 0.33, 0.0),
+    (18.6, 69, 0.29, 0.0),
+    (20.2, 66, 0.40, -0.006),
+    (22.1, 64, 0.31, 0.0),
+    (23.2, 62, 0.42, 0.0),      # 落在宫音上，喘一口气
+    (26.2, 64, 0.27, 0.007),
+    (27.4, 66, 0.31, 0.0),
+    (28.9, 69, 0.35, 0.0),
+    (30.2, 71, 0.28, 0.0),
+    (31.2, 69, 0.20, 0.0),      # 气口
+
+    # 第二句：抬高一个八度把气推上去
+    (32.2, 74, 0.42, 0.0),
+    (34.1, 76, 0.34, 0.0),
+    (35.1, 74, 0.30, 0.0),
+    (36.2, 71, 0.34, 0.0),
+    (37.7, 69, 0.36, -0.006),
+    (39.1, 66, 0.29, 0.0),
+    (40.2, 64, 0.31, 0.0),
+    (41.6, 66, 0.33, 0.007),
+    (43.1, 69, 0.35, 0.0),
+    (44.6, 71, 0.31, 0.0),
+    (45.6, 74, 0.34, 0.0),
+    (47.0, 76, 0.22, 0.0),
+
+    # 收束：一路下来，最后只剩一记低音
+    (48.0, 45, 0.26, 0.0),      # A2 低音撑一下
+    (49.4, 69, 0.30, 0.0),
+    (50.9, 66, 0.24, -0.006),
+    (52.3, 64, 0.26, 0.0),
+    (53.8, 62, 0.32, 0.0),
+    (56.2, 69, 0.15, 0.0),      # 泛音
+    (57.8, 66, 0.19, 0.0),
+    (59.4, 64, 0.17, 0.0),
+    (61.2, 62, 0.20, 0.0),
+    (63.0, 57, 0.14, 0.0),      # A3 泛音，接到下一圈的低音 D
 ]
 
-# 每 4 小节一次和弦：(起始拍, 低音 midi, 垫音 midi 列表)
-CHORDS = [
-    (0.0,  38, [62, 69, 74]),      # D 空五度（D4 A4 D5）
-    (16.0, 47, [59, 62, 66]),      # Bm（B3 D4 F#4）
-    (32.0, 43, [55, 59, 62]),      # G（G3 B3 D4）
-    (48.0, 45, [57, 64, 69]),      # A5（A3 E4 A4，留出回到 D 的余地）
+# 箫的对答：(拍, 音高, 时长, 力度, 句尾滑音)
+XIAO = [
+    (24.6, 69, 3.2, 0.090, -0.008),
+    (32.2, 76, 4.2, 0.080, 0.0),
+    (44.8, 74, 3.6, 0.075, -0.010),
+    (56.6, 69, 4.6, 0.085, 0.0),
 ]
+
+# 低音持续：(拍, 音高, 振幅)。第二段从 31.5s 起，与第一段交叠 2.5s，不断层。
+DRONES = [(0.0, 38, 0.052), (31.5, 38, 0.052)]
 
 
 def make_bgm():
-    """先铺两遍循环（第二遍才是要导出的那一段），
-    这样开头不会有"从零起振"的痕迹，结尾的余音也能折回开头。
-    两遍必须逐样本一致（每遍重新播种），否则循环点会错位、出现爆音。"""
+    """三遍逐样本一致地渲染整段，再取中间那遍 → 循环点天然连续。"""
     global rng
-    cycles = 3
-    total = LOOP * cycles + 4.0
+    total = LOOP * CYCLES + 6.0
     N = int(total * SR)
     dry = np.zeros(N)
 
-    # 和弦垫提前 2.5s 起振、延后 2.5s 收尾，两块交叠约 5s，中间不断层
-    lead, tail = 2.5, 2.5
-    for cyc in range(cycles):
+    for cyc in range(CYCLES):
         rng = np.random.default_rng(20261126 + 7)      # 每遍同一套随机数
-        for b0, bass, chord in CHORDS:
-            start = cyc * LOOP + b0 * BEAT - lead
-            dur = 16 * BEAT + lead + tail
-            for j, m in enumerate(chord):
-                add(dry, pad(m, start, dur, amp=0.100 if j == 0 else 0.072,
-                             attack=lead, release=tail), start)
-            # 低音持续音：正弦 + 一点二次谐波，很轻，只在手机外放时提供"底"
-            n = int(dur * SR)
-            t = np.arange(n) / SR
-            fb = round(midi_hz(bass) * LOOP) / LOOP
-            b = np.sin(2 * np.pi * fb * t) + 0.18 * np.sin(2 * np.pi * 2 * fb * t + 0.9)
-            env = np.ones(n)
-            a = min(int(lead * SR), n // 2)
-            r = min(int(tail * SR), n // 2)
-            env[:a] = np.linspace(0, 1, a) ** 0.5
-            env[-r:] = np.linspace(1, 0, r) ** 0.5
-            add(dry, b * env * 0.050, start)
+        base = cyc * LOOP
 
-        for beat, m, vel in MELODY:
-            dur = 3.0 if m < 60 else 2.3
-            add(dry, pluck(m, dur=dur, vel=vel * 0.80),
-                cyc * LOOP + beat * BEAT + rng.uniform(-0.012, 0.012))
-        # 极轻的泛音点缀（高声部，像远处风铃）
-        for beat, m, vel in [(8.0, 81, 0.10), (34.0, 86, 0.07), (57.0, 81, 0.08)]:
-            add(dry, pluck(m, dur=3.2, vel=vel * 0.8, bright=0.5), cyc * LOOP + beat * BEAT)
+        for b0, m, amp in DRONES:
+            add(dry, drone(m, 33.5, amp, 2.5, 2.5), base + b0)
 
-    # ---- 混响：指数衰减噪声做脉冲响应，湿声铺出空间 ----
-    ir_len = 2.8
+        for beat, m, vel, slide in MELODY:
+            dur = 4.6 if m < 56 else (3.4 if m < 68 else 2.8)
+            add(dry, qin(m, vel=vel * 0.88, slide=slide, dur=dur),
+                base + beat * BEAT + rng.uniform(-0.012, 0.012))
+
+        # 泛音点缀：pos=0.5 只留偶次谐波，清亮如击玉
+        for beat, m, vel in [(2.2, 74, 0.10), (56.2, 69, 0.08), (63.0, 57, 0.07)]:
+            add(dry, qin(m, vel=vel * 0.85, pos=0.5, dur=4.2, bright=0.7),
+                base + beat * BEAT)
+
+        for beat, m, dur, vel, bend in XIAO:
+            add(dry, xiao(m, dur=dur, vel=vel, bend=bend),
+                base + beat * BEAT + rng.uniform(-0.02, 0.02))
+
+    # ---- 混响：指数衰减噪声做脉冲响应，高频收得比低频快 ----
+    ir_len = 3.6
     ni = int(ir_len * SR)
     ti = np.arange(ni) / SR
-    ir = rng.standard_normal(ni) * np.exp(-ti / 0.62)
-    ir = fft_filter(ir, SR, lo=120, hi=4200, order=2)
-    ir[:int(0.012 * SR)] *= np.linspace(0, 1, int(0.012 * SR))
+    ir = rng.standard_normal(ni) * np.exp(-ti / 0.85)
+    ir = fft_filter(ir, SR, lo=130, hi=4200, order=2)
+    pd = int(0.022 * SR)                              # pre-delay：让直达声先出来
+    ir = np.concatenate([np.zeros(pd), ir])
+    ir[:pd + int(0.014 * SR)] *= 1.0
+    ir[pd:pd + int(0.014 * SR)] *= np.linspace(0, 1, int(0.014 * SR))
     ir /= np.sqrt(np.sum(ir ** 2)) + 1e-9
 
     Nfft = 1 << (len(dry) + ni - 1).bit_length()
     wet = np.fft.irfft(np.fft.rfft(dry, Nfft) * np.fft.rfft(ir, Nfft), Nfft)
-    wet = wet[:len(dry) + ni - 1]
+    wet = wet[:len(dry) + len(ir) - 1]
 
     mix = np.zeros(len(wet))
     mix[:len(dry)] += dry
-    mix += wet * 0.55
+    mix += wet * 0.62
 
     # ---- 取中间那一遍循环 ----
-    # 三遍逐样本一致、频率对齐到 1/64Hz 栅格，混响只回看 2.8s，
-    # 所以 64–128s 这一段已经是"稳态"：开头带着前面那遍的余响，
-    # 结尾的余响也已被第三遍接住。直接切片即可无缝循环，不需要再折叠尾巴
-    # （折叠会把同一段混响叠两遍，循环点会突然响一截）。
     n_loop = int(LOOP * SR)
     loop = mix[n_loop:n_loop * 2].copy()
 
-    # 收尾修形：去掉次声、整体柔化，再归一
-    loop = fft_filter(loop, SR, lo=60, hi=12000, order=2)
-    loop *= 0.62 / max(1e-9, np.max(np.abs(loop)))
+    # 收尾修形：去掉次声，柔化最刺的高频
+    loop = fft_filter(loop, SR, lo=62, hi=11000, order=2)
+
+    # 按整体能量定响度（古琴瞬态尖、平均值低，只按峰值归一会显得虚）
+    loop *= 0.115 / max(1e-9, rms(loop))
+    pk = float(np.max(np.abs(loop)))
+    if pk > 0.82:
+        loop *= 0.82 / pk
     return loop, SR
 
 
@@ -296,25 +349,19 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     tmp = os.path.join(OUT, '_tmp')
 
-    sfx, sr1 = make_page_flip()
-    write_wav(tmp + '_flip.wav', sfx, sr1)
-    s1 = encode(tmp + '_flip.wav', os.path.join(OUT, 'page-flip.mp3'),
-                ['-c:a', 'libmp3lame', '-b:a', '112k', '-ac', '1', '-ar', '44100'])
-    print('page-flip.mp3 %.1f KB  peak %.2f  rms %.1f dBFS'
-          % (s1 / 1024, np.max(np.abs(sfx)), db(rms(sfx))))
-
     bgm, sr2 = make_bgm()
     write_wav(tmp + '_bgm.wav', bgm, sr2)
     s2 = encode(tmp + '_bgm.wav', os.path.join(OUT, 'bgm.mp3'),
-                ['-c:a', 'libmp3lame', '-b:a', '64k', '-ac', '1', '-ar', '32000'])
+                ['-c:a', 'libmp3lame', '-b:a', '96k', '-ac', '1', '-ar', '32000'])
     s3 = encode(tmp + '_bgm.wav', os.path.join(OUT, 'bgm.ogg'),
-                ['-c:a', 'libvorbis', '-q:a', '2', '-ac', '1', '-ar', '32000'])
+                ['-c:a', 'libvorbis', '-q:a', '3', '-ac', '1', '-ar', '32000'])
     # 循环点是否连续：末 5ms 与首 5ms 的跳变
     jump = float(np.max(np.abs(bgm[:220] - bgm[-220:])))
-    print('bgm.mp3 %.1f KB / bgm.ogg %.1f KB  peak %.2f  rms %.1f dBFS  接缝跳变 %.3f'
-          % (s2 / 1024, s3 / 1024, np.max(np.abs(bgm)), db(rms(bgm)), jump))
+    print('时长 %.2fs  峰值 %.2f  整体 %.1f dBFS  接缝跳变 %.3f'
+          % (len(bgm) / sr2, np.max(np.abs(bgm)), db(rms(bgm)), jump))
+    print('bgm.mp3 %.0f KB / bgm.ogg %.0f KB' % (s2 / 1024, s3 / 1024))
 
-    for f in ('_flip.wav', '_bgm.wav'):
+    for f in ('_bgm.wav',):
         p = tmp + f
         if os.path.exists(p):
             os.remove(p)

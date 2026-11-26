@@ -1,9 +1,9 @@
 /* ===========================================================
  * 《山海舆图 · 先民观》—— 声音
  * -----------------------------------------------------------
- * 两样声音：
- *   1) 翻书声   assets/audio/page-flip.mp3   每次翻页响一声
- *   2) 背景乐   assets/audio/bgm.ogg / .mp3  轻柔纯音乐，64s 循环
+ * 只有一样声音：
+ *   背景乐   assets/audio/bgm.ogg / .mp3  轻柔纯音乐，64s 循环
+ * 翻页本身不发声（2026-11-26 按要求移除翻书音效）。
  *
  * 两条取声通道（自动选）：
  *   · buffer  ：fetch 取文件 → decodeAudioData → WebAudio 播放。
@@ -15,21 +15,18 @@
  * 必须守住的几点：
  *   · 自动播放策略：AudioContext.resume()/play() 一律放在用户第一次
  *     点击或按键里（capture 阶段监听，早于各按钮自己的 click）；
- *   · 两个文件在页面加载时就开始取，翻页时不等网络；
- *   · 翻页声同一时刻只留一声：新声响起前先把上一声 30ms 内淡掉并停住，
- *     连点不会叠成爆音；
- *   · 背景乐明显低于翻页声；静音同时管住两者，用平滑过渡，不"咔"。
+ *   · 音频在页面加载时就开始取、并解码好，第一次点击即出声，不等网络；
+ *   · 静音走总线增益（0.06s 线性），不"咔"；
+ *   · 开关状态记在 localStorage，刷新后保持。
  * =========================================================== */
 (function () {
   'use strict';
 
-  var SFX_SRC = 'assets/audio/page-flip.mp3';
   var BGM_OGG = 'assets/audio/bgm.ogg';
   var BGM_MP3 = 'assets/audio/bgm.mp3';
 
   var STORE_KEY = 'shanhai-sound';
-  var SFX_VOL = 0.50;        // 翻书声：短促，可以稍响
-  var MUSIC_VOL = 0.17;      // 背景乐：明显低于翻书声，只做底
+  var MUSIC_VOL = 0.17;      // 背景乐：只做底，不抢画面
   var MUSIC_FADE = 2.4;      // 起播淡入，避免"突然开始"
   var BGM_LOOP = 64.0;       // 素材正好 64s：循环点钉在这儿，顺带截掉编码器补的静音
 
@@ -42,14 +39,11 @@
   var mode = 'pending';          // pending | buffer | element | none
   var unlocked = false, loading = false, started = false;
 
-  var ctx = null, master = null, sfxGain = null, musicGain = null, analyser = null;
-  var sfxBuf = null, musicBuf = null;
-  var sfxRaw = null, musicRaw = null;
-  var sfxCur = null;             // 正在响的那一声（buffer 通道）
+  var ctx = null, master = null, musicGain = null, analyser = null;
+  var musicBuf = null, musicRaw = null;
   var musicNode = null;
-  var plays = 0;
 
-  var elMusic = null, elSfx = null, sfxTurn = 0;
+  var elMusic = null;
   var fadeTimer = 0;
 
   var listeners = [];
@@ -91,10 +85,6 @@
     master.connect(analyser);
     analyser.connect(ctx.destination);
 
-    sfxGain = ctx.createGain();
-    sfxGain.gain.value = SFX_VOL;
-    sfxGain.connect(master);
-
     musicGain = ctx.createGain();
     musicGain.gain.value = 0;        // 真要播时才淡上来
     musicGain.connect(master);
@@ -121,9 +111,6 @@
 
   function decodeAll() {
     if (!ctx) return;
-    if (sfxRaw && !sfxBuf) {
-      decode(sfxRaw).then(function (b) { sfxBuf = b; notify(); }, function () {});
-    }
     if (musicRaw && !musicBuf) {
       decode(musicRaw).then(function (b) {
         musicBuf = b;
@@ -136,12 +123,9 @@
   function startBufferPath() {
     var ogg = bgmSrc() === BGM_OGG;
     if (!ensureCtx()) return Promise.reject(new Error('noctx'));   // 建不出上下文就退回元素通道
-    return getBuf(SFX_SRC).then(function (b) {
-      sfxRaw = b;
-      return getBuf(ogg ? BGM_OGG : BGM_MP3).catch(function () {
-        if (!ogg) throw new Error('bgm');
-        return getBuf(BGM_MP3);                 // ogg 没取到就退回 mp3
-      });
+    return getBuf(ogg ? BGM_OGG : BGM_MP3).catch(function () {
+      if (!ogg) throw new Error('bgm');
+      return getBuf(BGM_MP3);                 // ogg 没取到就退回 mp3
     }).then(function (b) {
       musicRaw = b;
       mode = 'buffer';
@@ -167,37 +151,6 @@
     notify();
   }
 
-  function flipBuffer() {
-    if (!ctx || !sfxBuf) return;
-    if (ctx.state === 'suspended') {          // 刚解锁就翻页：恢复后这一声照样响
-      try { ctx.resume().catch(function () {}); } catch (e) {}
-    }
-    var t = ctx.currentTime;
-
-    // 上一声还没放完：先 30ms 淡掉并停住，避免两声叠在一起
-    if (sfxCur) {
-      var old = sfxCur; sfxCur = null;
-      try {
-        old.gain.gain.cancelScheduledValues(t);
-        old.gain.gain.setValueAtTime(old.gain.gain.value, t);
-        old.gain.gain.linearRampToValueAtTime(0, t + 0.03);
-        old.node.stop(t + 0.05);
-      } catch (e) {}
-    }
-
-    var src = ctx.createBufferSource();
-    src.buffer = sfxBuf;
-    src.playbackRate.value = 0.94 + Math.random() * 0.12;   // 每次略有不同，不像复读
-    var g = ctx.createGain();
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(1, t + 0.006);           // 极短淡入，去掉起振的"咔"
-    src.connect(g); g.connect(sfxGain);
-    src.start(t);
-    plays++;
-    sfxCur = { node: src, gain: g };
-    src.onended = function () { if (sfxCur && sfxCur.node === src) sfxCur = null; };
-  }
-
   /* ---------------- element 通道：<audio> ---------------- */
   function startElementPath() {
     if (mode === 'element' || mode === 'buffer') return;
@@ -208,13 +161,6 @@
       elMusic.preload = 'auto';
       elMusic.volume = 0;
       elMusic.load();
-
-      elSfx = [new Audio(SFX_SRC), new Audio(SFX_SRC)];
-      elSfx.forEach(function (a) {
-        a.preload = 'auto';
-        a.volume = enabled ? SFX_VOL : 0;
-        a.load();
-      });
     } catch (e) { mode = 'none'; }
     if (unlocked && enabled) startMusic();
     notify();
@@ -240,27 +186,7 @@
     notify();
   }
 
-  function flipElement() {
-    if (!elSfx || !elSfx.length) return;
-    // 两个元素轮换：连点时最多两声，且每声都从头放，不会无限叠加
-    var a = elSfx[sfxTurn++ % elSfx.length];
-    try {
-      a.pause();
-      a.currentTime = 0;
-      a.volume = SFX_VOL;
-      var p = a.play();
-      if (p && p.catch) p.catch(function () {});
-    } catch (e) {}
-    plays++;
-  }
-
   /* ---------------- 对外行为 ---------------- */
-  function flip() {
-    if (!enabled) return;
-    if (mode === 'buffer') flipBuffer();
-    else if (mode === 'element') flipElement();
-  }
-
   function startMusic() {
     if (!enabled) return;
     if (mode === 'buffer') startMusicBuffer();
@@ -268,12 +194,11 @@
   }
 
   function applyEnabled() {
-    // buffer 通道：一个 master 增益管住两样声音
+    // buffer 通道：master 增益管住背景乐
     if (ctx) ramp(master.gain, enabled ? 1 : 0, 0.06);
 
     // element 通道：直接改 volume（离线双击打开的场景，桌面浏览器支持）
     if (mode === 'element') {
-      if (elSfx) elSfx.forEach(function (a) { a.volume = enabled ? SFX_VOL : 0; });
       if (enabled) {
         startMusicElement();            // 关过再开：从头接上（started 已在关时清零）
       } else {
@@ -358,7 +283,6 @@
 
   /* ---------------- 调试 ---------------- */
   window.BookAudio = {
-    flip: flip,
     toggle: toggle,
     preload: preload,
     isEnabled: function () { return enabled; },
@@ -378,11 +302,8 @@
         enabled: enabled,
         ctx: ctx ? ctx.state : 'none',
         unlocked: unlocked,
-        sfx: mode === 'buffer' ? !!sfxBuf : mode === 'element',
         music: mode === 'buffer' ? !!musicBuf : mode === 'element',
         playing: mode === 'buffer' ? !!musicNode : !!(elMusic && !elMusic.paused),
-        plays: plays,
-        sfxDur: sfxBuf ? +sfxBuf.duration.toFixed(3) : 0,
         musicDur: musicBuf ? +musicBuf.duration.toFixed(2) : (elMusic ? +(elMusic.duration || 0).toFixed(2) : 0),
         musicReady: elMusic ? elMusic.readyState : (musicBuf ? 4 : 0)
       };

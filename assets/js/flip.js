@@ -143,13 +143,11 @@
       var page = cb.prepare(d);
       if (!page) return;
       busy = true; expectOk = true; dir = d;
-      if (cb.sfx) cb.sfx();                  // 减少动效时也有翻书声
       end();
       return;
     }
     if (busy) { pending = d; return; }
     if (!begin(d)) return;
-    if (cb.sfx) cb.sfx();                    // 纸开始动的那一瞬，响一声
     pose(angleFor(1, d), DUR);
     shadeTo(0, 1, DUR);
     endTimer = setTimeout(end, DUR + 90);
@@ -159,7 +157,6 @@
   function dragBegin(d) {
     if (reduce) return false;
     if (!begin(d)) return false;
-    if (cb.sfx) cb.sfx();                    // 手指拖动同样只响一声（按下的那一刻）
     expectOk = false;
     return true;
   }
@@ -227,7 +224,7 @@
   window.Flip = {
     init: function (o) {
       el = o;
-      cb = { prepare: o.prepare, commit: o.commit, cancel: o.cancel, sfx: o.sfx };
+      cb = { prepare: o.prepare, commit: o.commit, cancel: o.cancel };
       el.bookW = (el.book && el.book.getBoundingClientRect().width) || 900;
       window.addEventListener('resize', function () {
         var w = el.book && el.book.getBoundingClientRect().width;
