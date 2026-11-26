@@ -28,7 +28,10 @@ SITE = "https://zzzxxx-uai.github.io/shanhai/"
 GIT = r"C:/Users/zhouy/.workbuddy/vendor/PortableGit/mingw64/bin/git.exe"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-EXCLUDE_DIRS = {".git", "__pycache__", ".workbuddy", "node_modules", "_genimg", "_legacy_art", "_genimg_dunhuang", "录音"}
+EXCLUDE_DIRS = {".git", "__pycache__", ".workbuddy", "node_modules", "_genimg", "_legacy_art",
+                "_genimg_dunhuang", "_cdp_profile", "录音"}
+# 名字以 _ 开头的目录一律视为本地产物（探针配置、临时裁图等），不上传
+EXCLUDE_DIR_PREFIX = "_"
 EXCLUDE_EXT = {".pyc", ".tmp", ".log"}
 
 
@@ -90,7 +93,8 @@ def local_files():
 径），跳过临时/无关文件"""
     out = {}
     for dirpath, dirnames, filenames in os.walk(ROOT):
-        dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIRS]
+        dirnames[:] = [d for d in dirnames
+                       if d not in EXCLUDE_DIRS and not d.startswith(EXCLUDE_DIR_PREFIX)]
         for fn in filenames:
             if fn.startswith("_") or os.path.splitext(fn)[1] in EXCLUDE_EXT:
                 continue

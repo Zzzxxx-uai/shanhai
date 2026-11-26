@@ -8,6 +8,14 @@
 # 开发探针产物
 _probe*.html
 _probe*.txt
+_*.png
+_*.html
+_*.wav
+tools/_cdp_profile/
+_*.png
+_*.html
+_*.wav
+tools/_cdp_profile/
 
 # 图像生成原始产物（PNG 大图）与旧版素材备份：不进仓库
 tools/_genimg/

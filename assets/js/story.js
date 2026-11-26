@@ -1,6 +1,7 @@
 /* ===========================================================
  * 《山海舆图 · 先民观》绘本 · 交互与翻页
- * 纯原生 JS：翻页 + 目录。纯图文，无语音朗读与音效。
+ * 纯原生 JS：翻页 + 目录。声音（翻书声与背景乐）在 audio.js，
+ * 这里只在翻页起手时给它一个回调。
  * =========================================================== */
 (function () {
   'use strict';
@@ -28,7 +29,7 @@
   var btnPrev = document.getElementById('btn-prev');
   var btnNext = document.getElementById('btn-next');
 
-  /* 纯图文绘本：无语音朗读、无背景音乐、无音效。 */
+  /* 用户是否已经交互过（声音由 audio.js 自己按手势解锁，这里只留作语义标记） */
   var unlocked = false;
 
   function splitSentences(t) {
@@ -295,7 +296,8 @@
       book: bookEl, flip: flipEl, sheet: sheetEl,
       front: frontEl, back: backEl, sheen: sheenEl, drop: dropEl, dim: dimEl,
       cast: castEl, spine: spineEl,
-      prepare: flipPrepare, commit: flipCommit, cancel: flipCancel
+      prepare: flipPrepare, commit: flipCommit, cancel: flipCancel,
+      sfx: function () { if (window.BookAudio) window.BookAudio.flip(); }
     });
   }
 

@@ -47,6 +47,16 @@ button{font-family:var(--font)}
 .tbtn--say:hover{background:#B03326}
 .tbtn--say.is-on{background:#4A6B4F;border-color:#4A6B4F}
 
+/* 声音开关：喇叭图标 + 文字，关闭时图标换成打叉、整体压暗 */
+.tbtn--sound{display:inline-flex;align-items:center;gap:6px;padding:6px 11px}
+.tbtn--sound .ico{width:15px;height:15px;flex:0 0 auto;fill:none;stroke:currentColor;
+  stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.tbtn--sound .ico--off{display:none}
+.tbtn--sound.is-off{color:#B9AB95;background:rgba(255,255,255,.03)}
+.tbtn--sound.is-off .ico--on{display:none}
+.tbtn--sound.is-off .ico--off{display:block}
+@media (max-width:420px){.tbtn--sound .tbtn__t{display:none}}   /* 窄屏只留图标 */
+
 .stage{
   flex:1 1 auto;display:flex;align-items:center;justify-content:center;
   gap:8px;padding:20px 10px;position:relative;min-height:0;overflow:hidden;

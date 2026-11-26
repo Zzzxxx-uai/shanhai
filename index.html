@@ -22,6 +22,19 @@
   <header class="bar">
     <div class="bar__brand">山海舆图 <em>先民观</em></div>
     <div class="bar__tools">
+      <button class="tbtn tbtn--sound" id="btn-sound" type="button"
+              aria-pressed="true" aria-label="关闭声音" title="关闭声音">
+        <svg class="ico ico--on" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 9.6h3.3L12 5.9v12.2l-4.7-3.7H4z"/>
+          <path d="M15.4 9.2a4.3 4.3 0 0 1 0 5.6"/>
+          <path d="M17.9 6.7a7.9 7.9 0 0 1 0 10.6"/>
+        </svg>
+        <svg class="ico ico--off" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 9.6h3.3L12 5.9v12.2l-4.7-3.7H4z"/>
+          <path d="M16.2 9.4l4.3 4.7M20.5 9.4l-4.3 4.7"/>
+        </svg>
+        <span class="tbtn__t">声音</span>
+      </button>
       <button class="tbtn" id="btn-toc" type="button">目录</button>
     </div>
   </header>
@@ -75,6 +88,7 @@
 
 <script src="assets/js/pages.js"></script>
 <script src="assets/js/flip.js"></script>
+<script src="assets/js/audio.js"></script>
 <script src="assets/js/intro.js"></script>
 <script src="assets/js/story.js"></script>
 </body>
