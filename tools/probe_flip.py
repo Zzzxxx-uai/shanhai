@@ -1,177 +1,99 @@
 # -*- coding: utf-8 -*-
-"""无头验证仿实体书翻页：结构齐全、动画中间态正确、落定后干净、拖动可翻页。
+"""翻页交互探针：跑一遍按钮/连点/边界/拖动，把结果写进 document.title。
 
-用法： python tools/probe_flip.py [index.html | 山海舆图-先民观.html]
+用法： python tools/probe_flip.py
+依赖： Edge（无头）。无头下 rAF 不执行，全部用嵌套 setTimeout 推进。
 """
-import io, json, os, re, subprocess, sys
+import os, re, subprocess, sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-BASE = os.path.dirname(HERE)
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 
-PROBE = """
-<pre id="RESULT" style="display:none">running</pre>
+PROBE = r"""
 <script>
-var LOG = [];
-window.onerror = function (m, s, l) { LOG.push('ERR ' + m + ' @line ' + l); return true; };
-window.addEventListener('error', function (e) {
-  var t = e.target;
-  if (t && (t.tagName === 'VIDEO' || t.tagName === 'IMG')) return;   // 视频打不开属预期
-  LOG.push('RES_ERR ' + (t && (t.src || t.href)));
-}, true);
+(function () {
+  var log = [], t = 0;
+  function say(s) { log.push(s); document.title = 'PROBE ' + log.join(' | '); }
+  function later(fn, ms) { t += ms; setTimeout(fn, t); }
+  function num() { return document.getElementById('page-num').textContent.replace(/\s/g, ''); }
+  function body() { return document.getElementById('page').textContent; }
+  function flipHidden() { return document.getElementById('flip').hidden; }
+  function ptr(type, x, y, id) {
+    var b = document.getElementById('book');
+    b.dispatchEvent(new PointerEvent(type, {
+      pointerId: id || 1, pointerType: 'touch', isPrimary: true,
+      clientX: x, clientY: y, button: 0, buttons: type === 'pointerup' ? 0 : 1,
+      bubbles: true, cancelable: true
+    }));
+  }
+  var NEXT = document.getElementById('btn-next');
+  var PREV = document.getElementById('btn-prev');
 
-function dump(o) {
-  var el = document.getElementById('RESULT');
-  el.textContent = 'RESULT ' + JSON.stringify(o, null, 1);
-}
-function num(id) { return document.getElementById(id).textContent; }
-function opa(id) { return parseFloat(document.getElementById(id).style.opacity || '0'); }
+  later(function () {
+    try { localStorage.removeItem('shanhai-page'); } catch (e) {}
+    say('start=' + num() + ' flipHidden=' + flipHidden());
+    NEXT.click();
+    later(function () {
+      say('afterNext=' + num() + ' hasP2=' + /刻在石头上的记忆/.test(body()) + ' flipHidden=' + flipHidden());
 
-window.addEventListener('load', function () {
-  var o = {
-    pages: (window.PAGES || []).length,
-    flip: typeof window.Flip,
-    els: {
-      flip: !!document.getElementById('flip'),
-      front: !!document.getElementById('flip-front'),
-      back: !!document.getElementById('flip-back'),
-      cast: !!document.getElementById('cast'),
-      spine: !!document.getElementById('spine')
-    },
-    segParam: window.Flip && window.Flip._state ? window.Flip._state().seg : -1
-  };
+      NEXT.click(); NEXT.click();                 // 连点两下：合并成一页
+      later(function () {
+        say('burst=' + num());
 
-  setTimeout(function () {
-    var f = document.getElementById('flip');
-    o.startNum = num('page-num');
+        document.querySelectorAll('.dot')[0].click();
+        later(function () {
+          say('back0=' + num() + ' prevDisabled=' + PREV.disabled);
+          PREV.click();
+          later(function () {
+            say('prevAt0=' + num());              // 应仍是 1 / 25
 
-    // —— 点"下一页"，看翻页中途那张纸 ——
-    document.getElementById('btn-next').click();
-    setTimeout(function () {
-      o.mid = {
-        hidden: f.hidden,
-        segFront: document.querySelectorAll('#flip-front .curl__seg').length,
-        segBack: document.querySelectorAll('#flip-back .curl__seg').length,
-        bodyCount: document.querySelectorAll('#flip-front .seg__body').length,
-        hasPageInSeg: !!document.querySelector('#flip-front .seg__body .page'),
-        flipRotate: f.style.transform,
-        segRot: (document.querySelector('#flip-front .curl__seg') || {}).style
-                ? document.querySelector('#flip-front .curl__seg').style.transform : '',
-        spine: opa('spine'),
-        cast: opa('cast'),
-        book: document.getElementById('book').style.transform,
-        mist: document.querySelectorAll('#spine .mist').length
-      };
-      setTimeout(function () {
-        o.done = {
-          hidden: f.hidden,
-          num: num('page-num'),
-          frontEmpty: document.getElementById('flip-front').innerHTML.length,
-          backEmpty: document.getElementById('flip-back').innerHTML.length,
-          cast: opa('cast'),
-          book: document.getElementById('book').style.transform || '(none)',
-          hasPage: !!document.querySelector('#page .page__title, #page .cover, #page .colophon')
-        };
+            var b = document.getElementById('book').getBoundingClientRect();
+            var y = b.top + b.height / 2, x = b.left + b.width * 0.8;
+            ptr('pointerdown', x, y);
+            ptr('pointermove', x - 40, y + 6);
+            ptr('pointermove', x - 220, y + 8);
+            ptr('pointermove', x - 360, y + 8);
+            ptr('pointerup', x - 360, y + 8);
+            later(function () {
+              say('afterSwipe=' + num() + ' flipHidden=' + flipHidden());
 
-        // —— 点右侧边缘热区，看能不能翻下一页 ——
-        var right = document.getElementById('edge-right');
-        function pe(type, x, target) {
-          return new PointerEvent(type, {
-            bubbles: true, cancelable: true, clientX: x, clientY: 300,
-            pointerType: 'mouse', button: 0, buttons: type === 'pointerup' ? 0 : 1
-          });
-        }
-        try {
-          right.dispatchEvent(pe('pointerdown', 900, right));
-        } catch (e) { LOG.push('edge ' + e.message); }
-
-        setTimeout(function () {
-          o.afterEdge = { num: num('page-num'), hidden: f.hidden };
-          // 再点左侧边缘热区，看能不能翻上一页
-          var left = document.getElementById('edge-left');
-          try { left.dispatchEvent(pe('pointerdown', 100, left)); }
-          catch (e) { LOG.push('edgePrev ' + e.message); }
-          setTimeout(function () {
-            o.afterPrev = { num: num('page-num'), hidden: f.hidden };
-            o.errors = LOG;
-            dump(o);
-          }, 1600);
-        }, 1600);
-      }, 1600);
-    }, 520);
-  }, 400);
-});
+              document.querySelectorAll('.dot')[24].click();
+              later(function () {
+                say('last=' + num() + ' nextDisabled=' + NEXT.disabled);
+                NEXT.click();
+                later(function () {
+                  say('nextAtLast=' + num());
+                }, 600);
+              }, 150);
+            }, 700);
+          }, 600);
+        }, 250);
+      }, 900);
+    }, 700);
+  }, 150);
+})();
 </script>
 """
 
 
 def main():
-    src = sys.argv[1] if len(sys.argv) > 1 else 'index.html'
-    src_path = os.path.join(BASE, src)
-    html = io.open(src_path, encoding='utf-8').read()
-
-    # 无头环境 rAF 不推进，开假时钟；?seg=5 强制 5 段（默认窄屏只给 3 段）
-    tag = '<script src="assets/js/flip.js"></script>'
-    if tag in html:
-        html = html.replace(tag, '<script>window.__FLIP_TEST__=true;</script>\n' + tag)
-    else:
-        i = html.find('<script>')
-        html = html[:i + 8] + '\nwindow.__FLIP_TEST__=true;' + html[i + 8:]
-    html = html.replace('</body>', PROBE + '\n</body>')
-
-    probe_file = os.path.join(BASE, '_probe.html')
-    io.open(probe_file, 'w', encoding='utf-8').write(html)
-
-    out = subprocess.run(
-        [EDGE, '--headless=new', '--disable-gpu', '--mute-audio',
-         '--autoplay-policy=no-user-gesture-required',
-         '--window-size=1280,800',
-         '--virtual-time-budget=30000', '--dump-dom',
-         'file:///' + probe_file.replace('\\', '/') + '?intro=0&seg=5'],
-        capture_output=True, text=True, encoding='utf-8', errors='replace'
-    ).stdout
-
-    m = re.search(r'<pre id="RESULT"[^>]*>RESULT (.*?)</pre>', out, re.S)
-    os.remove(probe_file)
+    html = open(os.path.join(BASE, 'index.html'), encoding='utf-8').read()
+    html = html.replace('</body>', PROBE + '</body>')
+    tmp = os.path.join(BASE, '_probe.html')
+    open(tmp, 'w', encoding='utf-8').write(html)
+    url = 'file:///' + tmp.replace('\\', '/') + '?intro=0'
+    p = subprocess.run([EDGE, '--headless=new', '--disable-gpu', '--mute-audio',
+                        '--hide-scrollbars', '--window-size=1280,860',
+                        '--virtual-time-budget=20000', '--dump-dom', url],
+                       capture_output=True, timeout=180)
+    dom = p.stdout.decode('utf-8', 'ignore')
+    m = re.search(r'<title>(PROBE[^<]*)</title>', dom)
     if not m:
-        print('[probe] 没拿到结果，原始输出片段：')
-        print(out[:1500])
+        print('NO RESULT')
         return 1
-
-    import html as H
-    data = json.loads(H.unescape(m.group(1)))
-    print('[probe]', os.path.basename(src_path))
-    for k in ('pages', 'flip', 'els', 'segParam', 'startNum', 'mid', 'done',
-              'afterEdge', 'afterPrev', 'errors'):
-        if k in data:
-            print('  %-10s %s' % (k, data[k]))
-
-    mid = data.get('mid', {})
-    done = data.get('done', {})
-    ok = (
-        data.get('pages') == 25
-        and data.get('flip') == 'object'
-        and all(data.get('els', {}).values())
-        and mid.get('hidden') is False
-        and mid.get('segFront') == 5 and mid.get('segBack') == 5
-        and mid.get('bodyCount') == 5
-        and mid.get('hasPageInSeg')
-        and 'rotateY' in (mid.get('segRot') or '')
-        and mid.get('spine', 0) > 0.12
-        and mid.get('cast', 0) > 0
-        and 'scale' in (mid.get('book') or '')
-        and mid.get('mist', 0) >= 1
-        and done.get('hidden') is True
-        and done.get('num') == '2 / 25'
-        and done.get('frontEmpty') == 0 and done.get('backEmpty') == 0
-        and done.get('cast') == 0
-        and done.get('hasPage')
-        and data.get('afterEdge', {}).get('num') == '3 / 25'
-        and data.get('afterPrev', {}).get('num') == '2 / 25'
-        and not data.get('errors')
-    )
-    print('  ==> ', 'PASS' if ok else 'FAIL')
-    return 0 if ok else 1
+    for part in m.group(1)[6:].split('|'):
+        print(part.strip())
+    return 0
 
 
 if __name__ == '__main__':

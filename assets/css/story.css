@@ -50,6 +50,8 @@ button{font-family:var(--font)}
 .stage{
   flex:1 1 auto;display:flex;align-items:center;justify-content:center;
   gap:8px;padding:20px 10px;position:relative;min-height:0;overflow:hidden;
+  /* 只放行纵向滚动（移动端）：横向手势交给 JS 做翻页，避免和正文滚动打架 */
+  touch-action:pan-y;overscroll-behavior-x:none;
 }
 .nav{
   flex:0 0 auto;width:46px;height:76px;font-size:30px;line-height:1;
@@ -58,7 +60,8 @@ button{font-family:var(--font)}
   transition:.25s var(--ease);-webkit-tap-highlight-color:transparent;
 }
 .nav:hover{background:rgba(255,255,255,.14)}
-.nav[disabled]{opacity:.25;cursor:default}
+/* 首末页：按钮整块隐去（用 visibility 保留占位，避免书页跟着位移） */
+.nav[disabled]{opacity:0;visibility:hidden;pointer-events:none;cursor:default}
 @media (max-width:720px){
   .nav{position:absolute;bottom:6px;height:44px;width:44px;font-size:24px;z-index:5}
   .nav--prev{left:10px}.nav--next{right:10px}
@@ -68,7 +71,7 @@ button{font-family:var(--font)}
 /* ---------- 书页 ---------- */
 .book{
   flex:1 1 auto;max-width:1040px;height:100%;max-height:640px;
-  position:relative;perspective:2600px;transform-style:preserve-3d;
+  position:relative;
   will-change:transform;
 }
 .book__base{position:relative;height:100%;z-index:1}
@@ -181,27 +184,11 @@ button{font-family:var(--font)}
 .colo__k{font-size:12px;letter-spacing:.24em;color:var(--red);margin-bottom:6px}
 .colo__v{font-size:13.5px;line-height:2;color:var(--ink-soft)}
 
-/* ---------- 翻页：仿实体书 ---------- */
-/* 翻页期间提前露出的"下一页"半边（跨页书：纸离开右半后右半先换；回翻则左半先换） */
-.book__next{
-  position:absolute;top:0;bottom:0;z-index:2;visibility:hidden;overflow:hidden;
-}
-.book__next.is-right{left:50%;right:0}
-.book__next.is-left{left:0;right:50%}
-.book__next-in{position:absolute;top:0;height:100%}
-.book__next.is-right .book__next-in{left:-100%;width:200%}
-.book__next.is-left .book__next-in{left:0;width:200%}
-
-.book__cast{          /* 翻起的纸落在下面一页上的影子 */
-  /* 渐变写死在这儿，方向与长度交给 scaleX（纯合成，不重绘）：
-     靠书脊一端最浓，向自由端渐淡；向左时 scaleX(-1) 镜像即可。 */
-  position:absolute;left:50%;top:0;bottom:0;width:50%;z-index:2;
-  transform-origin:left center;pointer-events:none;opacity:0;
-  background:linear-gradient(90deg,rgba(60,42,20,.5) 0%,rgba(60,42,20,.2) 42%,rgba(60,42,20,0) 100%);
-  filter:blur(7px);
-}
-@media (max-width:860px){   /* 窄屏单页：纸从左边起，影子铺满整幅 */
-  .book__cast{left:0;width:100%}
+/* ---------- 翻页：一张纸绕书脊翻转 ---------- */
+.book__cast{          /* 纸离开书脊时，书脊处透出的阴影（只动 opacity，纯合成） */
+  position:absolute;left:0;top:0;bottom:0;width:44%;z-index:2;
+  pointer-events:none;opacity:0;
+  background:linear-gradient(90deg,rgba(46,30,12,.44) 0%,rgba(46,30,12,.18) 44%,rgba(46,30,12,0) 100%);
 }
 .book__spine{         /* 书缝里溢出的青金山海微光 */
   position:absolute;left:-14px;top:4%;bottom:4%;width:58px;z-index:5;
@@ -211,59 +198,70 @@ button{font-family:var(--font)}
     radial-gradient(44% 56% at 26% 38%,rgba(236,206,128,.42) 0%,rgba(236,206,128,0) 70%);
   filter:blur(2px);
 }
+
+/* 翻动的那张纸。外面这层只负责"裁"和"透视"：
+ * 越过书口的部分裁掉（纸绕左缘转到 90° 以后会跑到书的左边去），
+ * 同时把透视装在这一层，纸张的 3D 才有纵深。 */
 .flip{
-  /* 桌面跨页书：翻的纸 = 右半页，绕书脊（中线）转 */
-  position:absolute;left:50%;right:0;top:0;bottom:0;z-index:3;
-  transform-origin:left center;transform-style:preserve-3d;
-}
-.flip.is-turning{will-change:transform}   /* 只在这一张纸翻动时提示合成器 */
-@media (max-width:860px){
-  .flip{left:0}   /* 窄屏单页：整页绕左缘转 */
+  position:absolute;inset:0;z-index:3;
+  perspective:7000px;perspective-origin:50% 50%;
 }
 .flip[hidden]{display:none}
-.flip__face{position:absolute;inset:0;transform-style:preserve-3d}
-.flip__back{
-  transform-origin:left center;   /* 必须同绕书脊，否则纸的背面会错位 */
-  transform:rotateY(180deg);
+.flip__sheet{
+  position:absolute;inset:0;
+  transform-origin:left center;             /* 绕书脊（书页左缘）转 */
+  transform-style:preserve-3d;
+  backface-visibility:hidden;-webkit-backface-visibility:hidden;
+  will-change:transform;
+  background:var(--paper);
+  /* 纸离开桌面时的落影：让抬起来的那张纸有重量，不是凭空浮着 */
+  box-shadow:0 26px 54px rgba(26,15,4,.42),0 4px 12px rgba(26,15,4,.28);
 }
-.flip__face::after{  /* 纸张切口（书口一侧）：能看见"厚度"的一小条 */
-  content:'';position:absolute;right:0;top:0;bottom:0;width:3px;
-  background:linear-gradient(270deg,#FFFDF6 0%,#EADFC4 60%,rgba(234,223,196,0) 100%);
-}
-
-/* 纸条：首尾相接，各自绕左缘转一点，连起来就是卷曲的纸 */
-.curl{position:absolute;inset:0;transform-style:preserve-3d;transform-origin:left center}
-.curl__seg{
-  position:absolute;top:0;bottom:0;
-  transform-origin:left center;transform-style:preserve-3d;
+.flip__side{
+  position:absolute;inset:0;overflow:hidden;
+  backface-visibility:hidden;-webkit-backface-visibility:hidden;
   background:var(--paper);
 }
-.seg__clip{position:absolute;inset:-1px;overflow:hidden}   /* 外扩1px：相邻纸条互相搭接，消掉接缝 */
-.seg__body{position:absolute;top:0;height:100%}
-.seg__shade{position:absolute;inset:0;background:#120C06;opacity:0;pointer-events:none}
+.flip__back{transform:rotateY(180deg)}
+.flip__back::after{   /* 纸背：不印字，只有一点纸纹与边缘的暗 */
+  content:'';position:absolute;inset:0;
+  background:
+    linear-gradient(90deg,rgba(43,30,14,.16),rgba(43,30,14,0) 26%),
+    linear-gradient(160deg,#FBF6E8,#F2EAD6);
+}
+/* 纸面反光：书脊侧偏暗（弯折处背光）、书口侧偏亮，翻页中途最明显 */
+.flip__sheen{
+  position:absolute;inset:0;pointer-events:none;opacity:0;
+  background:linear-gradient(90deg,
+    rgba(42,27,10,.34) 0%,rgba(42,27,10,.10) 17%,rgba(255,255,255,0) 44%,
+    rgba(255,255,255,.10) 80%,rgba(255,255,255,.20) 100%);
+}
+/* 纸转过 60° 以后逐渐背离光源：越立越暗，到接近竖立时只剩纸边的一点暗影，
+ * 不会在书脊上留一根亮白的细线。 */
+.flip__dim{
+  position:absolute;inset:0;pointer-events:none;opacity:0;background:#120C06;
+}
+/* 纸口投在下一页上的影子：跟着纸一起转，位置永远贴着纸边，不用每帧算 */
+.flip__drop{
+  position:absolute;left:100%;top:-6%;bottom:-6%;width:26%;
+  pointer-events:none;opacity:0;
+  background:linear-gradient(90deg,
+    rgba(26,15,4,.30) 0%,rgba(26,15,4,.16) 26%,rgba(26,15,4,.05) 62%,rgba(26,15,4,0) 100%);
+}
+.flip__sheet::after{  /* 纸的切边：书口那一小条高光，让纸有厚度 */
+  content:'';position:absolute;right:0;top:0;bottom:0;width:2px;
+  background:linear-gradient(270deg,rgba(255,253,246,.9),rgba(234,223,196,0));
+}
+.flip .flip__front{pointer-events:none}      /* 纸上的"开卷"按钮不该被点到 */
 
-/* 薄雾粒子 */
-.mist{
-  position:absolute;display:block;border-radius:50%;pointer-events:none;opacity:0;
-  background:radial-gradient(circle,rgba(207,243,230,.95) 0%,rgba(150,215,196,.4) 42%,rgba(150,215,196,0) 72%);
-  filter:blur(1px);
-  animation:mistUp 1.6s ease-out forwards;
-}
-@keyframes mistUp{
-  0%{opacity:0;transform:translate(0,0) scale(.35)}
-  18%{opacity:.9}
-  100%{opacity:0;transform:translate(-16px,-130px) scale(1.6)}
-}
-/* ---------- 翻页期间的性能降级 ----------
- * 纸的正面背面各被复制了 segN 份（默认 7×2 = 14 份整页内容），
- * 每帧都得光栅化这 14 份；贵的效果在翻页时一律卸掉，静止时再给回。
- * 这一处省下的开销，比其它微调加起来都多。 */
+/* 翻页期间把昂贵的效果从纸上卸掉：
+ * 整页内容只画一次，随后只是被 3D 变换搬动，不再重排。 */
 .flip .page{box-shadow:none;transition:none}
-.flip .page__fig img{filter:none}                 /* 14 份 drop-shadow + 色彩矩阵，最贵的一项 */
-.flip .page::after{background:linear-gradient(90deg,rgba(0,0,0,.1),rgba(0,0,0,0))}
+.flip .page__fig img{filter:brightness(1.035) saturate(1.15) contrast(1.02)}
 .flip .page *{animation:none!important;transition:none!important}
-.flip.is-turning .curl__seg,
-.flip.is-turning .seg__shade{will-change:transform,opacity}
+.book.is-grab{cursor:grabbing;user-select:none;-webkit-user-select:none}
+.book.is-grab .page{border-radius:0 3px 3px 0}
+
 
 /* ---------- 书的厚度：两侧的纸叠 ---------- */
 .stack{
@@ -299,7 +297,7 @@ button{font-family:var(--font)}
 }
 @media (prefers-reduced-motion:reduce){
   .book.is-in{animation:none}
-  .mist{display:none}
+  .flip__sheet{will-change:auto}
 }
 
 /* ---------- 页脚 ---------- */

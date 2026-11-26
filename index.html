@@ -34,12 +34,17 @@
       <div class="book__base" id="base">
         <article class="page" id="page"></article>
       </div>
-      <div class="book__next" id="next-half"></div>
-      <div class="book__cast" id="cast"></div>
-      <div class="book__spine" id="spine"></div>
+      <div class="book__cast" id="cast" aria-hidden="true"></div>
+      <div class="book__spine" id="spine" aria-hidden="true"></div>
+      <!-- 翻动的那张纸：正面是揭下来的那一页，背面是纸背 -->
       <div class="flip" id="flip" hidden>
-        <div class="flip__face flip__front" id="flip-front"></div>
-        <div class="flip__face flip__back" id="flip-back"></div>
+        <div class="flip__sheet" id="sheet">
+          <div class="flip__side flip__front" id="flip-front"></div>
+          <div class="flip__side flip__back" id="flip-back"></div>
+          <div class="flip__sheen" id="flip-sheen"></div>
+          <div class="flip__drop" id="flip-drop" aria-hidden="true"></div>
+          <div class="flip__dim" id="flip-dim" aria-hidden="true"></div>
+        </div>
       </div>
       <i class="stack stack--r" aria-hidden="true"></i>
       <!-- 左右边缘翻页热区：仅这两条窄带可点击翻页，中间图文区不响应 -->
@@ -54,7 +59,7 @@
     <div class="foot__inner">
       <span class="foot__num" id="page-num">1 / 25</span>
       <div class="dots" id="dots"></div>
-      <span class="foot__hint" id="foot-hint">点击书页边缘翻页 · 键盘 ← →</span>
+      <span class="foot__hint" id="foot-hint">点击书页边缘 · 左右滑动 · 键盘 ← →</span>
     </div>
   </footer>
 

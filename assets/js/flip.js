@@ -1,378 +1,249 @@
 /* ===========================================================
  * 《山海舆图 · 先民观》—— 仿实体书翻页引擎
- *
- * 思路：把正在翻动的那一张纸，沿水平方向切成若干"纸条"，
- * 纸条首尾相接、各自绕自己的左缘转一点点角度，折线连起来就是纸的卷曲弧面。
- * 每根纸条的明暗按真实光照（法线 · 光源方向）算，所以纸弯起来时会有明暗过渡。
- * 再配上：底页投影、纸张厚度、落页回弹、书脊青金微光与薄雾粒子。
- * （纯图文绘本：无翻页音效。）
+ * -----------------------------------------------------------
+ * 一张纸绕书脊（书页左缘）在 3D 空间里翻过去，露出下面那一页。
+ * 位移只用 transform，明暗只用 opacity，全部落在合成层上：
+ *   · 页面内容翻页前一次性铺好，动画期间不再读写 DOM 尺寸，不触发布局；
+ *   · 位移交给 CSS transition（合成器跑，主线程抖动也不掉帧）；
+ *   · 明暗（纸面反光、书脊阴影、微光）由一小段 rAF 跟随同一条缓动曲线，
+ *     每帧只写 opacity，同样不重排。
+ * 交互：边缘点击、键盘（由 story.js 转发）、左右拖动（鼠标与手指同一套
+ *      Pointer 事件，横向判定后接手，纵向滚动照常交给浏览器）。
  * =========================================================== */
 (function () {
   'use strict';
 
-  var DUR = 1060;         // 一次翻页时长（舒缓）
-  var CURL = 0.75;        // 卷曲强度（柔和内敛：纸微微卷起，不鼓成大弧面）
-  var PUSH = 0.045;       // 翻到中段时整张纸向观察者推近的程度（占书宽）——压低3D顶出感
-  var n = 7;              // 纸条数（越多越圆滑，越费性能）
+  var DUR = 380;                                    // 整页翻转时长（300–500ms 区间）
+  var EASE = 'cubic-bezier(.42,0,.26,1)';           // 缓入缓出
+  var GLOW = 0.12;                                  // 静止时书脊微光
+  var DRAG_W = 0.72;                                // 拖到书宽的这个比例即算翻完
 
-  var el = {}, cb = {}, segN = 7, bookW = 900, frac = 0.5;
-  var busy = false, dragging = false, dir = 1;
-  var from = 0, to = 1, t0 = 0, dur = DUR, raf = null;
-  var segsF = [], segsB = [], shF = [], shB = [], misted = false, revealed = false, lastB = '';
-  var mistOn = true;
-  var GLOW = 0.12;
-  var frozen = -1;          // 平时书缝里透出的一点微光
+  var el = {}, cb = {};
+  var dir = 1, busy = false, pending = 0, expectOk = true;
+  var pCur = 0;                                     // 当前翻页进度 0–1
+  var rafId = null, endTimer = 0, suppressUntil = 0;
+  var st = null;                                    // 当前手势状态
+
   var reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches);
 
-  /* 上一帧写进 DOM 的值：相同就不重写，省掉大量样式失效 */
-  var castD = -1, castTF = '', bookTF = '', glow = -1;
-
-  /* ---------- 自适应画质 ----------
-   * 纸被切成 segN 张复制，画得越细越贵。每翻完一页量一次真实帧间隔：
-   * 平均掉到 21.5ms 以下（约 46fps）就减段，明显有余量再加回来。
-   * 无头 __FLIP_TEST__ 下关掉，保证测试可复现。 */
-  var autoQ = true, QMAX = 7, QMIN = 4;
-  var accMs = 0, cntF = 0, prevT = 0;
-  function qualityTune() {
-    if (!autoQ || cntF < 24) return;
-    var avg = accMs / cntF;
-    if (avg > 21.5) { if (n > QMIN) n--; }
-    else if (avg < 14 && n < QMAX) n++;
-  }
-
+  var raf = window.requestAnimationFrame || function (f) { return setTimeout(function () { f(Date.now()); }, 16); };
+  var caf = window.cancelAnimationFrame || clearTimeout;
+  function now() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
   function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
 
-  /* ---------- 把一页内容铺进某个"纸面"，并切成 n 根纸条 ----------
-   * frac = 纸宽 / 整页宽（桌面跨页书翻右半页：0.5；窄屏单页翻整页：1）。
-   * body 铺整页 HTML（宽 = N/frac 段宽），第 i 段的窗口要落在整页的
-   *   正面：书脊端 h0f 起、向外递增（跨页 0.5，单页 0）
-   *   背面：书脊端 h0b 起、向外递减（跨页 0.5，单页 1）——翻过来后从左读到右
-   * 由此 body 相对第 i 段的偏移 = -(h*N/frac ∓ i)*100%。 */
-  function buildFace(face, html, collectSeg, collectSh, isBack) {
-    face.innerHTML = '';
-    collectSeg.length = 0; collectSh.length = 0;
+  /* 与 CSS 的 cubic-bezier(.42,0,.26,1) 形状接近，只用来让明暗跟手；
+   * 位移本身完全交给 CSS，主线程忙时也不会拖慢纸张。 */
+  function easeInOut(x) { return x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2; }
 
-    var curl = document.createElement('div');
-    curl.className = 'curl';
+  /* 进度 → 角度：正向 0→-90（纸抬起、立到与视线垂直）；回翻 -90→0（纸落下、铺回）。
+   * 只翻到 90°：过了 90° 纸就转到书脊左侧、要让位给"左半页"，
+   * 而这本书一页就是一整幅跨页，没有左半页可落，翻到立起即止最干净，
+   * 也顺带免掉了越出书口被裁切的问题。 */
+  function angleFor(p, d) { return -90 * (d > 0 ? p : 1 - p); }
 
-    var bodyW = (segN / frac * 100).toFixed(4) + '%';
-    var h0 = (segN / frac) * (frac < 1 ? 0.5 : (isBack ? 1 : 0));
+  /* ---------- 摆纸 ----------
+   * 只写 transform；dur>0 时挂上过渡，位移交给合成器。 */
+  function pose(deg, dur) {
+    var s = el.sheet.style;
+    s.transition = dur ? ('transform ' + dur + 'ms ' + EASE) : 'none';
+    s.transform = 'rotateY(' + deg.toFixed(2) + 'deg)';
+  }
+  /* 起过渡前把当前样式结算掉，否则浏览器会把"起点"和"终点"合成一次跳变。
+   * 只在起手/落定时调用，拖动过程中不需要（拖动本来就是逐帧直写）。 */
+  function flush() { void el.sheet.offsetWidth; }
 
-    var parent = curl, i;
-    for (i = 0; i < segN; i++) {
-      var seg = document.createElement('div');
-      seg.className = 'curl__seg';
-      if (i === 0) { seg.style.left = '0'; seg.style.width = (100 / segN) + '%'; }
-      else { seg.style.left = '100%'; seg.style.width = '100%'; }
-
-      var clip = document.createElement('div');
-      clip.className = 'seg__clip';
-
-      var body = document.createElement('div');
-      body.className = 'seg__body';
-      body.style.width = bodyW;
-      body.style.left = (-(h0 + (isBack ? -(i + 1) : i)) * 100).toFixed(4) + '%';
-      body.innerHTML = html;
-
-      var shade = document.createElement('div');
-      shade.className = 'seg__shade';
-
-      clip.appendChild(body);
-      clip.appendChild(shade);
-      seg.appendChild(clip);
-      parent.appendChild(seg);
-
-      collectSeg.push(seg); collectSh.push(shade);
-      parent = seg;                 // 下一根纸条挂在上一根末尾，首尾相接
-    }
-    face.appendChild(curl);
+  /* ---------- 明暗 ----------
+   * k 在翻页中途最大：纸面反光最亮、书脊阴影最深，两端归零，不会有突兀的跳变。 */
+  function shade(p) {
+    var q = clamp(p, 0, 1);
+    var k = Math.sin(Math.PI * q);            // 中途最浓，两端归零
+    var edge = dir > 0 ? q : 1 - q;           // 0 = 平铺，1 = 立起（与方向无关）
+    el.sheen.style.opacity = (0.10 + 0.90 * k).toFixed(3);
+    el.drop.style.opacity = (0.85 * k).toFixed(3);
+    el.cast.style.opacity = (0.92 * k).toFixed(3);
+    el.spine.style.opacity = (GLOW + 0.5 * k).toFixed(3);
+    /* 后段：纸越立越背光。近端被透视放大会比书页高出一截，若仍是纸的亮色，
+     * 在深色桌面上会看成一根白刺；转暗之后它自然沉进背景里。 */
+    el.dim.style.opacity = (0.9 * (edge > 0.62 ? Math.min(1, (edge - 0.62) / 0.34) : 0)).toFixed(3);
+    /* 立到 97% 以上彻底淡掉，落定时不会有一丝残影 */
+    el.sheet.style.opacity = (edge > 0.97 ? Math.max(0, 1 - (edge - 0.97) / 0.025) : 1).toFixed(3);
   }
 
-  /* 纸条转过的角度：整体角 a 按权重分配给各纸条；
-   * 权重留 30% 的"常弯底量"——起手时纸角就先翘起来，而不是整块平板慢吞吞地转；
-   * 中段（sin πt 最大）弯得最厉害。权重曲线用 sin^1.3，让中段纸条集中多转，弧更圆。
-   *
-   * 性能：wBase[i] = sin^1.3(πx)(1-0.45x) 只跟第几段有关，铺纸时算一次存好；
-   * 每帧只剩 1+k·wBase 与归一化，省掉每段的 Math.pow / Math.sin。 */
-  var wBase = [], angBuf = [];
-  function computeWeights() {
-    wBase.length = 0; angBuf.length = segN;
-    for (var i = 0; i < segN; i++) {
-      var x = (i + 0.5) / segN;
-      wBase.push(Math.pow(Math.sin(Math.PI * x), 1.3) * (1 - 0.45 * x));
-      angBuf[i] = 0;
-    }
+  function shadeTo(from, to, dur) {
+    stopShade();
+    var t0 = now();
+    (function tick() {
+      var k = clamp((now() - t0) / dur, 0, 1);
+      shade(from + (to - from) * easeInOut(k));
+      rafId = k < 1 ? raf(tick) : null;
+    })();
   }
+  function stopShade() { if (rafId) { caf(rafId); rafId = null; } }
 
-  function segAngles(a, t) {
-    var k = CURL * (0.3 + 0.7 * Math.sin(Math.PI * clamp(t, 0, 1)));
-    var sum = 0, i, wi;
-    for (i = 0; i < segN; i++) { wi = 1 + k * wBase[i]; angBuf[i] = wi; sum += wi; }
-    for (i = 0; i < segN; i++) angBuf[i] = a * angBuf[i] / sum;
-    return angBuf;
-  }
-
-  /* 光照：光源大致在左上前方，纸面法线随纸条累计转角而变，
-   * 法线与光线夹角越小越亮 —— 弯起来的纸于是自带明暗过渡。 */
-  var LX = -0.42, LZ = 0.78;
-  function lum(rad) {
-    var d = Math.sin(rad) * LX + Math.cos(rad) * LZ;
-    return clamp(d, 0, 1);
-  }
-
-  /* 明暗按 0.006 量化：肉眼分不出档差，但可以省掉大量无谓的样式写入 */
-  function paint(segs, shades, angs) {
-    var cum = 0, i, op;
-    for (i = 0; i < segs.length; i++) {
-      cum += angs[i];
-      var tr = 'rotateY(' + angs[i].toFixed(2) + 'deg)';
-      if (tr !== segs[i].__tr) { segs[i].__tr = tr; segs[i].style.transform = tr; }
-      op = clamp((1 - (0.34 + 0.66 * lum(cum * Math.PI / 180))) * 0.62, 0, 0.66);
-      op = Math.round(op / 0.006) * 0.006;
-      if (op !== shades[i].__op) {
-        shades[i].__op = op;
-        shades[i].style.opacity = op.toFixed(3);
-      }
-    }
-  }
-
-  /* ---------- 每一帧：摆好纸、影子、微光和镜头 ---------- */
-  function apply(uu) {
-    var t = clamp(uu, 0, 1);
-    var a = dir > 0 ? -180 * uu : -180 * (1 - uu);      // 纸的整体转角
-    var lift = Math.sin(Math.PI * t);                    // 抬起程度
-    var angs = segAngles(a, t);
-
-    paint(segsF, shF, angs);
-    paint(segsB, shB, angs);
-    // 整张纸向观察者推近：透视下纸会放大迎面而来，"掀起来"的感觉。
-    // 注意只能平移（不能转），角度全在纸条链上，flip 本身一转就会翻倍。
-    el.flip.style.transform = 'translateZ(' + (PUSH * bookW * lift).toFixed(1) + 'px)';
-
-    // 过半之后，朝上的已经是纸的另一面；纸刚离开的那半边提前露出目标页
-    var back = dir > 0 ? (uu > 0.5) : (uu < 0.5);
-    if (el.front) el.front.style.visibility = back ? 'hidden' : 'visible';
-    if (el.back) el.back.style.visibility = back ? 'visible' : 'hidden';
-    if (!revealed && Math.abs(a) >= 89.9) {
-      revealed = true;
-      if (el.next && frac < 1) {     // 窄屏单页用不上（整页都是纸）
-        el.next.className = 'book__next ' + (dir > 0 ? 'is-right' : 'is-left');
-        el.next.innerHTML = '<div class="book__next-in">' + lastB + '</div>';
-        el.next.style.visibility = 'visible';
-      }
-      if (cb.reveal) cb.reveal();
-    }
-
-    /* 落在底页上的影子：纸悬在书脊哪一侧，影子就铺向哪一侧，靠书脊处最浓，向自由端渐淡。
-     * 只写 opacity 和 transform（两个纯合成属性，走 GPU，不触发布局与重绘）；
-     * 渐变本身写死在 CSS 里，方向靠 scaleX(-1) 镜像，不再每帧拼字符串。 */
-    if (el.cast) {
-      var swing = Math.cos(a * Math.PI / 180) * (dir > 0 ? 1 : -1);   // 自由端在右半还是左半
-      var dens = Math.round(0.5 * lift * (1 - Math.pow(t, 6)) * 50) / 50;
-      if (dens !== castD) { castD = dens; el.cast.style.opacity = dens.toFixed(2); }
-      var sp = Math.round(Math.abs(swing) * 0.92 * 50) / 50;
-      var ctf = (swing >= 0 ? 'scaleX(' : 'scaleX(-') + sp.toFixed(2) + ')';
-      if (ctf !== castTF) { castTF = ctf; el.cast.style.transform = ctf; }
-    }
-    // 书缝里溢出的青金微光
-    if (el.spine) {
-      var gl = mistOn ? Math.round((GLOW + 0.55 * lift) * 100) / 100 : 0;
-      if (gl !== glow) { glow = gl; el.spine.style.opacity = gl.toFixed(2); }
-    }
-
-    // 镜头轻微后退，给翻过去的纸让出画面
-    if (el.book) {
-      var s = 1 - 0.052 * lift;
-      var tx = (dir > 0 ? 1 : -1) * 2.6 * lift;
-      var btf = 'translateX(' + tx.toFixed(2) + '%) scale(' + s.toFixed(4) + ')';
-      if (btf !== bookTF) { bookTF = btf; el.book.style.transform = btf; }
-    }
-
-    // 翻页一开始就停用左右边缘热区，别跟翻动的纸打架
-    if (el.edgeLeft) el.edgeLeft.style.visibility = t < 0.04 ? '' : 'hidden';
-    if (el.edgeRight) el.edgeRight.style.visibility = t < 0.04 ? '' : 'hidden';
-
-    if (!misted && uu > 0.1) { misted = true; mist(); }
-  }
-
-  /* ---------- 薄雾粒子 ---------- */
-  function mist() {
-    if (!el.spine || !mistOn) return;
-    var many = n <= QMIN ? 5 : 8;         // 画质降下来时粒子也少一点，别拖慢翻页
-    for (var i = 0; i < many; i++) {
-      var d = document.createElement('i');
-      d.className = 'mist';
-      var s = 3 + Math.random() * 7;
-      d.style.width = d.style.height = s.toFixed(1) + 'px';
-      d.style.left = (Math.random() * 26 - 4).toFixed(1) + 'px';
-      d.style.bottom = (Math.random() * 40).toFixed(0) + '%';
-      d.style.animationDelay = (Math.random() * 0.5).toFixed(2) + 's';
-      d.style.animationDuration = (1.3 + Math.random() * 1.1).toFixed(2) + 's';
-      el.spine.appendChild(d);
-      (function (node) {
-        setTimeout(function () { if (node.parentNode) node.parentNode.removeChild(node); }, 3000);
-      })(d);
-    }
-  }
-
-  /* ---------- 动画节拍 ---------- */
-  /* 两端慢、中间快：手翻书页就是这样起手和落下的 */
-  function ease(x) {
-    return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-  }
-
-  function step(now) {
-    if (!busy) return;
-    var k = clamp((now - t0) / dur, 0, 1);
-    // 采真实帧间隔（只有真浏览器才有意义），用来决定要不要降价
-    if (prevT) { accMs += now - prevT; cntF++; }
-    prevT = now;
-    var e = ease(k);
-    // 落页时两次阻尼振荡：纸"啪"地拍下、再轻轻弹一下才服帖（幅度调小，落页更轻柔）
-    if (k > 0.74) {
-      var q = (k - 0.74) / 0.26;
-      e += Math.sin(q * Math.PI * 2.6) * Math.exp(-3.4 * q) * 0.014;
-    }
-    apply(from + (to - from) * e);
-    if (k < 1) { raf = request(step); return; }
-    finish(to > 0.5);
-  }
-
-  var vt = 0;
-  var request = window.requestAnimationFrame || function (f) { return setTimeout(function () { f(Date.now()); }, 16); };
-  var cancel = window.cancelAnimationFrame || clearTimeout;
-  if (window.__FLIP_TEST__) {   // 无头环境 rAF 不跑，改成按帧步进的假时钟
-    request = function (f) { vt += 16; return setTimeout(function () { f(vt); }, 16); };
-  }
-
-  function run(f, t, d) {
-    from = f; to = t; dur = d; busy = true;
-    if (window.__FLIP_TEST__) { vt = 0; t0 = 0; }
-    else { t0 = (window.performance && performance.now) ? performance.now() : Date.now(); }
-    step(t0);
-  }
-
-  function finish(done) {
-    busy = false; dragging = false;
-    if (raf) { try { cancel(raf); } catch (e) {} } raf = null;
-    el.flip.hidden = true;
-    el.flip.classList.remove('is-turning');
-    el.flip.style.transform = '';
-    qualityTune();                                   // 据这一场的真实帧间隔调下一场的画质
-    // 只倒空两个纸面，front / back 这两个壳得留着
-    if (el.front) { el.front.innerHTML = ''; el.front.style.visibility = 'visible'; }
-    if (el.back) { el.back.innerHTML = ''; el.back.style.visibility = 'visible'; }
-    if (el.book) el.book.style.transform = '';
-    if (el.cast) { el.cast.style.opacity = 0; el.cast.style.width = ''; }
-    if (el.spine) el.spine.style.opacity = mistOn ? GLOW : 0;
-    if (el.edgeLeft) el.edgeLeft.style.visibility = '';
-    if (el.edgeRight) el.edgeRight.style.visibility = '';
-    if (el.next) { el.next.style.visibility = 'hidden'; el.next.innerHTML = ''; }
-    segsF = []; segsB = []; shF = []; shB = [];
-    misted = false; revealed = false; lastB = '';
-    if (done) { if (cb.commit) cb.commit(dir); }
-    else { if (cb.cancel) cb.cancel(dir); }
-  }
-
-  /* ---------- 准备：把当前页铺在纸的一面、目标页铺在另一面 ---------- */
-  function prepare(d) {
-    var r = cb.prepare(d);
-    if (!r) return false;
-    dir = d;
-    segN = n;
-    revealed = false;
-    castD = -1; castTF = ''; bookTF = ''; glow = -1;    // 新一场翻新：缓存作废
-    prevT = 0; accMs = 0; cntF = 0;
-    computeWeights();
-    // 只有真正翻开的时候才给这张纸加 will-change（常驻反而占资源）
-    if (el.flip) el.flip.classList.add('is-turning');
-    // 纸宽：桌面跨页书翻右半页（书宽一半），窄屏单页翻整页
-    frac = (window.matchMedia && window.matchMedia('(max-width:860px)').matches) ? 1 : 0.5;
-    lastB = r.b;
-    if (el.flip) {
-      var w = el.flip.getBoundingClientRect().width;
-      if (w > 40) bookW = w;
-    }
-    // r.a = 尚未翻动时朝上的那一面（当前页）；r.b = 翻过去后朝上的那一面（目标页）
-    if (d > 0) {
-      buildFace(el.front, r.a, segsF, shF, false);
-      buildFace(el.back, r.b, segsB, shB, true);
-    } else {
-      buildFace(el.front, r.b, segsF, shF, false);
-      buildFace(el.back, r.a, segsB, shB, true);
-    }
+  /* ---------- 铺纸：内容一次写完 ---------- */
+  function laySheet(page) {
     el.flip.hidden = false;
-    apply(0);
+    el.front.innerHTML = page.html;
+    el.back.innerHTML = '';
+    if (page.scroll) {                       // 纸是从滚动到一半的那一页揭下来的
+      var a = el.front.querySelector('.page');
+      var b = el.front.querySelector('.page__body');
+      if (a && page.scroll[0]) a.scrollTop = page.scroll[0];
+      if (b && page.scroll[1]) b.scrollTop = page.scroll[1];
+    }
+  }
+
+  /* ---------- 起手 ----------
+   * 先把纸摆到起点（正向 0°：整张盖住底页；回翻 -90°：立在书脊处、看不见），
+   * 结算一次样式再起步，任何时刻都不会露出中间态或空白页。 */
+  function begin(d) {
+    var page = cb.prepare(d);
+    if (!page) return false;                 // 边界：没有这一页，静默忽略
+    dir = d; busy = true; expectOk = true; pCur = 0;
+    laySheet(page);
+    pose(angleFor(0, d), 0);
+    shade(0);
+    flush();
     return true;
   }
 
-  /* ---------- 对外：整页翻动 ---------- */
-  /* 翻页动画未结束时，直接忽略二次翻页请求（不排队），
-   * 从根上杜绝「纸卡在半翻 / 连翻跳页」的 bug。 */
-  function go(d) {
-    if (busy) return;
-    if (!prepare(d)) return;
-    if (reduce) { finish(true); return; }      // 用户要求减少动效
-    if (frozen >= 0) { apply(frozen); return; } // ?freeze=.45 把纸停在半途，方便看效果
-    run(0, 1, DUR);
+  /* ---------- 结束 ---------- */
+  function end() {
+    if (!busy) return;
+    busy = false;
+    clearTimeout(endTimer); endTimer = 0;
+    stopShade();
+
+    el.flip.hidden = true;
+    el.sheet.style.transition = 'none';
+    el.sheet.style.transform = '';
+    el.front.innerHTML = '';
+    el.back.innerHTML = '';
+    el.sheen.style.opacity = 0;
+    el.drop.style.opacity = 0;
+    el.dim.style.opacity = 0;
+    el.cast.style.opacity = 0;
+    el.sheet.style.opacity = 1;
+    el.spine.style.opacity = GLOW;
+    if (el.book) el.book.classList.remove('is-grab');
+
+    if (expectOk) { if (cb.commit) cb.commit(dir); }
+    else { if (cb.cancel) cb.cancel(dir); }
+
+    if (pending) {                            // 动画期间多按的一下只记一槽，落定后接着翻
+      var d = pending; pending = 0;
+      setTimeout(function () { turn(d); }, 0);
+    }
   }
 
-  /* ---------- 边缘热区点击翻页 ----------
-   * 只允许点击书页左右边缘（各约 10% 宽）触发翻页，中间图文区不响应，
-   * 彻底避免阅读时误触翻页。右缘翻下一页、左缘翻上一页。 */
-  function bindEdges() {
-    var left = el.edgeLeft, right = el.edgeRight;
-    function onTap(d) {
-      return function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        go(d);                       // busy 时 go() 内部直接忽略，天然防连点
-      };
+  /* ---------- 整页翻动 ---------- */
+  function turn(d) {
+    if (d !== 1 && d !== -1) return;
+    if (reduce) {                            // 系统要求减少动效：直接换页
+      var page = cb.prepare(d);
+      if (!page) return;
+      busy = true; expectOk = true; dir = d;
+      end();
+      return;
     }
-    if (left) {
-      left.addEventListener('pointerdown', function (e) {
-        if (e.button != null && e.button !== 0) return;
-        onTap(-1)(e);
-      });
+    if (busy) { pending = d; return; }
+    if (!begin(d)) return;
+    pose(angleFor(1, d), DUR);
+    shadeTo(0, 1, DUR);
+    endTimer = setTimeout(end, DUR + 90);
+  }
+
+  /* ---------- 拖动 ---------- */
+  function dragBegin(d) {
+    if (reduce) return false;
+    if (!begin(d)) return false;
+    expectOk = false;
+    return true;
+  }
+
+  function dragMove(dx) {
+    pCur = clamp(Math.abs(dx) / (el.bookW * DRAG_W), 0, 1);
+    pose(angleFor(pCur, dir), 0);
+    shade(pCur);
+  }
+
+  function dragSettle(complete) {
+    var to = complete ? 1 : 0;
+    var dur = clamp(DUR * Math.abs(to - pCur), 220, DUR + 60);
+    expectOk = complete;
+    flush();
+    pose(angleFor(to, dir), dur);
+    shadeTo(pCur, to, dur);
+    clearTimeout(endTimer);
+    endTimer = setTimeout(end, dur + 90);
+  }
+
+  function bindGestures() {
+    var book = el.book;
+    if (!book) return;
+
+    book.addEventListener('pointerdown', function (e) {
+      if (e.button != null && e.button !== 0) return;
+      st = { id: e.pointerId, x0: e.clientX, y0: e.clientY, axis: 0, live: true };
+    });
+
+    book.addEventListener('pointermove', function (e) {
+      if (!st || !st.live || e.pointerId !== st.id) return;
+      var dx = e.clientX - st.x0, dy = e.clientY - st.y0;
+
+      if (!st.axis) {                       // 先判方向：竖着划就还给浏览器滚动
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        if (Math.abs(dx) <= Math.abs(dy) * 1.15) { st.live = false; return; }
+        st.axis = 1;
+        if (busy) { st.live = false; return; }     // 正在翻：不接新手势，免得纸被撕成两半
+        if (!dragBegin(dx < 0 ? 1 : -1)) { st.live = false; return; }  // 边界：不翻也不拦
+        try { book.setPointerCapture(e.pointerId); } catch (err) {}
+        book.classList.add('is-grab');
+      }
+      dragMove(dx);
+    });
+
+    function finishGesture(e, cancelled) {
+      if (!st || e.pointerId !== st.id) return;
+      var s = st; st = null;
+      if (!s.live || !s.axis) return;
+      suppressUntil = now() + 400;          // 拖动之后浏览器补发的 click 一律吞掉
+      book.classList.remove('is-grab');
+      if (cancelled) { dragSettle(false); return; }
+      dragSettle(Math.abs(e.clientX - s.x0) / (el.bookW * DRAG_W) > 0.28);
     }
-    if (right) {
-      right.addEventListener('pointerdown', function (e) {
-        if (e.button != null && e.button !== 0) return;
-        onTap(1)(e);
-      });
-    }
+    book.addEventListener('pointerup', function (e) { finishGesture(e, false); });
+    book.addEventListener('pointercancel', function (e) { finishGesture(e, true); });
+
+    /* 拖完会补发一次 click，落点若在"开卷"或边缘热区上就会多翻一页，这里截住 */
+    book.addEventListener('click', function (e) {
+      if (now() < suppressUntil) { e.stopPropagation(); e.preventDefault(); }
+    }, true);
   }
 
   window.Flip = {
     init: function (o) {
       el = o;
-      cb = { prepare: o.prepare, commit: o.commit, cancel: o.cancel, reveal: o.reveal };
-      // 先按设备给个默认值，再用网址参数 / 全局变量覆盖（方便调试与测试）
-      if (window.matchMedia && window.matchMedia('(max-width:860px)').matches) n = 3;
-      if (reduce) n = 1;
-      var fz = /[?&]freeze=([\d.]+)/.exec(location.search);
-      if (fz) frozen = clamp(parseFloat(fz[1]), 0, 1);
-      var q = /[?&]seg=(\d+)/.exec(location.search);
-      if (q) n = clamp(parseInt(q[1], 10) || 1, 1, 8);
-      if (window.__FLIP_SEG__) n = clamp(window.__FLIP_SEG__, 1, 8);
-      // 网址硬指定段数、或无头测试：关掉自适应，保证表现可复现
-      if (q || window.__FLIP_SEG__ || window.__FLIP_TEST__ || reduce) autoQ = false;
-      // 弱机起步就降压，别等到第一场翻完再降
-      var cores = navigator.hardwareConcurrency || 4;
-      if (cores <= 4 && n > 5) n = 5;
-      bindEdges();
+      cb = { prepare: o.prepare, commit: o.commit, cancel: o.cancel };
+      el.bookW = (el.book && el.book.getBoundingClientRect().width) || 900;
+      window.addEventListener('resize', function () {
+        var w = el.book && el.book.getBoundingClientRect().width;
+        if (w) el.bookW = w;
+      });
+      if (el.spine) el.spine.style.opacity = GLOW;
+      bindGestures();
     },
-    go: go,
+    go: turn,
     busy: function () { return busy; },
-    mist: function (on) {
-      mistOn = !!on;
-      if (el.spine) {
-        el.spine.style.opacity = mistOn ? GLOW : 0;
-        if (!mistOn) el.spine.innerHTML = '';
-      }
-    },
-    /* 给无头测试用：直接跳到某个进度 */
-    _apply: apply,
-    _state: function () { return { busy: busy, dragging: dragging, dir: dir, seg: segN }; }
+    /* 调试：把纸停在某个进度（?freeze=0.45 由 story.js 调用），便于截图检查 */
+    freeze: function (p, d) {
+      if (!begin(d === -1 ? -1 : 1)) return false;
+      pCur = clamp(p, 0, 1);
+      expectOk = false;
+      pose(angleFor(pCur, dir), 0);
+      shade(pCur);
+      busy = false;                          // 不再自动结束，停在半途
+      return true;
+    }
   };
 })();
