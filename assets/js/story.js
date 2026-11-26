@@ -18,6 +18,7 @@
   var spineEl = document.getElementById('spine');
   var stageEl = document.getElementById('stage');
   var cornerEl = document.getElementById('corner');
+  var cornerPrevEl = document.getElementById('corner-prev');
   var dotsEl  = document.getElementById('dots');
   var numEl   = document.getElementById('page-num');
   var tocEl   = document.getElementById('toc');
@@ -411,6 +412,7 @@
     btnPrev.disabled = idx === 0;
     btnNext.disabled = idx === TOTAL - 1;
     if (cornerEl) cornerEl.classList.toggle('is-off', idx === TOTAL - 1);
+    if (cornerPrevEl) cornerPrevEl.classList.toggle('is-off', idx === 0);
     var dots = dotsEl.children;
     for (var i = 0; i < dots.length; i++) dots[i].classList.toggle('is-on', i === idx);
     var items = tocEl.children;
@@ -595,13 +597,17 @@
   if (window.Flip) {
     Flip.init({
       stage: stageEl, book: bookEl, flip: flipEl, front: frontEl, back: backEl,
-      cast: castEl, spine: spineEl, corner: cornerEl, next: document.getElementById('next-half'),
+      cast: castEl, spine: spineEl, corner: cornerEl, cornerPrev: cornerPrevEl, next: document.getElementById('next-half'),
       prepare: flipPrepare, commit: flipCommit, cancel: flipCancel, reveal: flipReveal
     });
   }
   // 书口翘角 = 翻下一页的快捷入口
   if (cornerEl) {
     cornerEl.addEventListener('click', function () { unlocked = true; go(1); });
+  }
+  // 左侧翘角 = 翻上一页
+  if (cornerPrevEl) {
+    cornerPrevEl.addEventListener('click', function () { unlocked = true; go(-1); });
   }
 
   // 不支持 Pointer Events 的老浏览器：退回"滑动一下翻一页"

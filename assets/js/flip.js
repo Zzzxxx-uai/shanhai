@@ -10,8 +10,8 @@
   'use strict';
 
   var DUR = 1060;         // 一次翻页时长（舒缓）
-  var CURL = 1.1;         // 卷曲强度（大：纸要弯出弧面，不是斜板）
-  var PUSH = 0.10;        // 翻到中段时整张纸向观察者推近的程度（占书宽）——纸是"掀"向读者的
+  var CURL = 0.75;        // 卷曲强度（柔和内敛：纸微微卷起，不鼓成大弧面）
+  var PUSH = 0.045;       // 翻到中段时整张纸向观察者推近的程度（占书宽）——压低3D顶出感
   var n = 7;              // 纸条数（越多越圆滑，越费性能）
 
   var el = {}, cb = {}, segN = 7, bookW = 900, frac = 0.5;
@@ -189,6 +189,7 @@
 
     // 翻页一开始就把书口的翘角藏起来，别跟纸打架
     if (el.corner) el.corner.style.visibility = t < 0.04 ? '' : 'hidden';
+    if (el.cornerPrev) el.cornerPrev.style.visibility = t < 0.04 ? '' : 'hidden';
 
     if (!misted && uu > 0.1) { misted = true; mist(); }
   }
@@ -250,10 +251,10 @@
     if (prevT) { accMs += now - prevT; cntF++; }
     prevT = now;
     var e = ease(k);
-    // 落页时两次阻尼振荡：纸"啪"地拍下、再轻轻弹一下才服帖
+    // 落页时两次阻尼振荡：纸"啪"地拍下、再轻轻弹一下才服帖（幅度调小，落页更轻柔）
     if (k > 0.74) {
       var q = (k - 0.74) / 0.26;
-      e += Math.sin(q * Math.PI * 2.6) * Math.exp(-3.4 * q) * 0.022;
+      e += Math.sin(q * Math.PI * 2.6) * Math.exp(-3.4 * q) * 0.014;
     }
     apply(from + (to - from) * e);
     if (k < 1) { raf = request(step); return; }
@@ -288,6 +289,7 @@
     if (el.cast) { el.cast.style.opacity = 0; el.cast.style.width = ''; }
     if (el.spine) el.spine.style.opacity = mistOn ? GLOW : 0;
     if (el.corner) el.corner.style.visibility = '';
+    if (el.cornerPrev) el.cornerPrev.style.visibility = '';
     if (el.next) { el.next.style.visibility = 'hidden'; el.next.innerHTML = ''; }
     segsF = []; segsB = []; shF = []; shB = [];
     misted = false; revealed = false; lastB = '';

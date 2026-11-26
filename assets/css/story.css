@@ -68,7 +68,7 @@ button{font-family:var(--font)}
 /* ---------- 书页 ---------- */
 .book{
   flex:1 1 auto;max-width:1040px;height:100%;max-height:640px;
-  position:relative;perspective:1700px;transform-style:preserve-3d;
+  position:relative;perspective:2600px;transform-style:preserve-3d;
   will-change:transform;
 }
 .book__base{position:relative;height:100%;z-index:1}
@@ -318,6 +318,10 @@ body.is-dragging .sen{pointer-events:none}
 .corner:hover i,.corner:focus-visible i{border-width:0 0 58px 58px}
 .corner:hover u,.corner:focus-visible u{border-width:0 0 68px 68px}
 .corner.is-off{opacity:0;pointer-events:none}
+/* 左侧翘角：镜像上一页的快捷入口（右下角翻下一页、左下角翻上一页） */
+.corner--prev{right:auto;left:-1px;bottom:-1px}
+.corner--prev i,.corner--prev u{right:auto;left:0;transform:scaleX(-1)}
+.corner--prev i{border-bottom-right-radius:0;border-bottom-left-radius:4px}
 @media (prefers-reduced-motion:reduce){
   .corner i,.corner u{transition:none}
 }
