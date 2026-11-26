@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>山海舆图 · 先民观｜有声绘本</title>
-<meta name="description" content="以《山海经》为基底的有声绘本电子书，翻页即有人声讲述，水墨淡彩插画。">
+<title>山海舆图 · 先民观｜绘本</title>
+<meta name="description" content="以《山海经》为基底的图文绘本电子书，仿实体书翻页，敦煌重彩插画。">
 <link rel="stylesheet" href="assets/css/story.css">
 </head>
 <body>
@@ -22,9 +22,7 @@
   <header class="bar">
     <div class="bar__brand">山海舆图 <em>先民观</em></div>
     <div class="bar__tools">
-      <button class="tbtn tbtn--say" id="btn-say" type="button">朗读</button>
       <button class="tbtn" id="btn-toc" type="button">目录</button>
-      <button class="tbtn" id="btn-set" type="button">设置</button>
     </div>
   </header>
 
@@ -55,7 +53,7 @@
     <div class="foot__inner">
       <span class="foot__num" id="page-num">1 / 25</span>
       <div class="dots" id="dots"></div>
-      <span class="foot__hint" id="foot-hint">左右滑动翻页 · 键盘 ← →</span>
+      <span class="foot__hint" id="foot-hint">点击书页边缘翻页 · 键盘 ← →</span>
     </div>
   </footer>
 
@@ -69,49 +67,7 @@
   </div>
 </div>
 
-<!-- 设置 -->
-<div class="sheet" id="sheet-set" hidden>
-  <div class="sheet__box">
-    <div class="sheet__head"><span>朗读与音乐</span><button class="sheet__x" data-close type="button">×</button></div>
-    <div class="set">
-      <label class="set__row">
-        <span>讲述声音</span>
-        <select id="set-voice"></select>
-      </label>
-      <label class="set__row">
-        <span>语速</span>
-        <input type="range" id="set-rate" min="0.6" max="1.4" step="0.1" value="0.95">
-        <b id="set-rate-val">0.95</b>
-      </label>
-      <label class="set__row set__row--check">
-        <input type="checkbox" id="set-auto" checked>
-        <span>翻页后自动讲述</span>
-      </label>
-      <label class="set__row set__row--check">
-        <input type="checkbox" id="set-bgm" checked>
-        <span>背景音乐（讲述时自动压低）</span>
-      </label>
-      <label class="set__row">
-        <span>音乐音量</span>
-        <input type="range" id="set-bgmvol" min="0" max="100" step="5" value="30">
-        <b id="set-bgmvol-val">30</b>
-      </label>
-      <label class="set__row set__row--check">
-        <input type="checkbox" id="set-sfx" checked>
-        <span>翻页的纸张沙沙声</span>
-      </label>
-      <label class="set__row set__row--check">
-        <input type="checkbox" id="set-mist" checked>
-        <span>翻页时的山海微光与薄雾</span>
-      </label>
-      <p class="set__note" id="set-note">翻页效果为实时三维演算：纸张按段弯曲、随光照明暗、落页有回弹；可在网址后加 ?seg=1 关闭弯曲（省性能）。</p>
-    </div>
-  </div>
-</div>
-
 <script src="assets/js/pages.js"></script>
-<script src="assets/js/audio-map.js"></script>
-<script src="assets/js/bgm.js"></script>
 <script src="assets/js/flip.js"></script>
 <script src="assets/js/intro.js"></script>
 <script src="assets/js/story.js"></script>

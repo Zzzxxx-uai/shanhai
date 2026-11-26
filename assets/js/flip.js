@@ -4,7 +4,8 @@
  * 思路：把正在翻动的那一张纸，沿水平方向切成若干"纸条"，
  * 纸条首尾相接、各自绕自己的左缘转一点点角度，折线连起来就是纸的卷曲弧面。
  * 每根纸条的明暗按真实光照（法线 · 光源方向）算，所以纸弯起来时会有明暗过渡。
- * 再配上：底页投影、纸张厚度、落页回弹、书脊青金微光与薄雾粒子、翻页沙沙声。
+ * 再配上：底页投影、纸张厚度、落页回弹、书脊青金微光与薄雾粒子。
+ * （纯图文绘本：无翻页音效。）
  * =========================================================== */
 (function () {
   'use strict';
@@ -18,7 +19,7 @@
   var busy = false, dragging = false, dir = 1;
   var u = 0, from = 0, to = 1, t0 = 0, dur = DUR, raf = null, queued = 0;
   var segsF = [], segsB = [], shF = [], shB = [], misted = false, revealed = false, lastB = '';
-  var sndOn = true, mistOn = true, actx = null;
+  var mistOn = true;
   var GLOW = 0.12;
   var frozen = -1;          // 平时书缝里透出的一点微光
   var reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches);
@@ -214,30 +215,6 @@
     }
   }
 
-  /* ---------- 翻页的沙沙声（程序生成，无版权） ---------- */
-  function paper(strength) {
-    if (!sndOn) return;
-    try {
-      var AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return;
-      actx = actx || new AC();
-      if (actx.state === 'suspended') actx.resume();
-      var len = Math.floor(actx.sampleRate * 0.3);
-      var buf = actx.createBuffer(1, len, actx.sampleRate);
-      var d = buf.getChannelData(0);
-      for (var i = 0; i < len; i++) {
-        var p = i / len;
-        d[i] = (Math.random() * 2 - 1) * Math.pow(1 - p, 2.4) * (0.55 + 0.45 * Math.sin(p * 46));
-      }
-      var src = actx.createBufferSource(); src.buffer = buf;
-      var bp = actx.createBiquadFilter(); bp.type = 'bandpass';
-      bp.frequency.value = 1500 + Math.random() * 900; bp.Q.value = 0.6;
-      var g = actx.createGain(); g.gain.value = 0.13 * (strength || 1);
-      src.connect(bp); bp.connect(g); g.connect(actx.destination);
-      src.start();
-    } catch (e) {}
-  }
-
   /* ---------- 动画节拍 ---------- */
   /* 两端慢、中间快：手翻书页就是这样起手和落下的 */
   function ease(x) {
@@ -293,7 +270,7 @@
     if (el.next) { el.next.style.visibility = 'hidden'; el.next.innerHTML = ''; }
     segsF = []; segsB = []; shF = []; shB = [];
     misted = false; revealed = false; lastB = '';
-    if (done) { paper(0.7); if (cb.commit) cb.commit(dir); }
+    if (done) { if (cb.commit) cb.commit(dir); }
     else { if (cb.cancel) cb.cancel(dir); }
     // 动画期间点的下一页不丢，落定后接着翻
     if (queued) { var q = queued; queued = 0; go(q); }
@@ -337,7 +314,6 @@
     if (!prepare(d)) return;
     if (reduce) { finish(true); return; }      // 用户要求减少动效
     if (frozen >= 0) { apply(frozen); return; } // ?freeze=.45 把纸停在半途，方便看效果
-    paper(1);
     run(0, 1, DUR);
   }
 
@@ -347,7 +323,6 @@
     if (!prepare(d)) return false;
     dragging = true; busy = true;
     dir = d;
-    paper(0.55);
     return true;
   }
   function dragTo(pp) {
@@ -427,7 +402,6 @@
     },
     go: go,
     busy: function () { return busy; },
-    sound: function (on) { sndOn = !!on; },
     mist: function (on) {
       mistOn = !!on;
       if (el.spine) {

@@ -1,6 +1,6 @@
 /* ===========================================================
- * 《山海舆图 · 先民观》有声绘本 · 交互与朗读
- * 纯原生 JS：翻页 + 人声讲述（Web Speech API）+ 目录 + 设置
+ * 《山海舆图 · 先民观》绘本 · 交互与翻页
+ * 纯原生 JS：翻页 + 目录。纯图文，无语音朗读与音效。
  * =========================================================== */
 (function () {
   'use strict';
@@ -22,21 +22,12 @@
   var dotsEl  = document.getElementById('dots');
   var numEl   = document.getElementById('page-num');
   var tocEl   = document.getElementById('toc');
-  var btnSay  = document.getElementById('btn-say');
   var btnPrev = document.getElementById('btn-prev');
   var btnNext = document.getElementById('btn-next');
-  var hintEl  = document.getElementById('foot-hint');
 
-  /* ---------------- 讲述（Web Speech API / 真人录音） ---------------- */
-  var synth = window.speechSynthesis;
-  var supported = !!synth && typeof window.SpeechSynthesisUtterance === 'function';
-  var AUDIO = window.AUDIO || {};        // 已导入的真人录音：{页号: 'assets/audio/p01.mp3'}
-  var voices = [], curVoice = null;
-  var rate = 0.92, auto = true, unlocked = false;
-  var sentences = [], offsets = [], plain = '';
-  var si = 0, playing = false, paused = false;
-  var media = 'tts';                     // 'tts' 合成语音 | 'audio' 真人录音
-  var audioEl = null, boundaryHit = false, usedFallback = false;
+  /* 纯图文绘本：无语音朗读、无背景音乐、无音效。
+   * unlocked 仅用于标记用户已进入绘本（无实质用途，保留以最小化改动）。 */
+  var unlocked = false;
 
   function splitSentences(t) {
     var out = [], buf = '';
@@ -46,253 +37,6 @@
     }
     if (buf.replace(/\s/g, '')) out.push(buf);
     return out;
-  }
-
-  function isZh(v) { return v && /^zh/i.test(v.lang || ''); }
-
-  /* 音色排序：自然/神经网络音色远胜传统 SAPI 音色（后者就是"人机感"的主因）。
-   * 命中越靠前越优先；用户手动选过则尊重用户选择。 */
-  var VOICE_RANK = [
-    /Natural|Neural|神经/i,
-    /Xiaoxiao|晓晓/i,
-    /Yunxi|云希|Yunjian|云健|Yunyang|云扬/i,
-    /Xiaoyi|晓伊|Xiaomo|晓墨/i,
-    /Huihui|慧慧/i,
-    /Yaoyao|瑶瑶/i,
-    /Tingting|Ting-Ting|婷婷/i,
-    /Kangkang|康康/i
-  ];
-
-  function voiceScore(v) {
-    for (var i = 0; i < VOICE_RANK.length; i++) {
-      if (VOICE_RANK[i].test(v.name)) return VOICE_RANK.length - i;
-    }
-    return 0;
-  }
-
-  function loadVoices() {
-    if (!supported) return;
-    voices = synth.getVoices() || [];
-    if (!voices.length) return;
-    var sel = document.getElementById('set-voice');
-    var saved = localStorage.getItem('shanhai-voice');
-    var list = voices.filter(isZh).slice().sort(function (a, b) {
-      return voiceScore(b) - voiceScore(a);
-    });
-    sel.innerHTML = '';
-    list.forEach(function (v) {
-      var o = document.createElement('option');
-      o.value = v.name;
-      var natural = /Natural|Neural/i.test(v.name);
-      o.textContent = v.name
-        .replace(/Microsoft |Online \(|\)|—/g, '')
-        .replace(/\s+/g, ' ')
-        .trim() + (natural ? '（自然音色）' : '');
-      sel.appendChild(o);
-    });
-    curVoice = voices.filter(function (v) { return v.name === saved; })[0] || null;
-    if (!curVoice) curVoice = list[0] || null;
-    if (curVoice) sel.value = curVoice.name;
-    updateHint();
-  }
-
-  function highlight(i) {
-    var sens = pageEl.querySelectorAll('.sen');
-    for (var k = 0; k < sens.length; k++) sens[k].classList.toggle('is-on', k === i);
-  }
-  function clearHL() {
-    var sens = pageEl.querySelectorAll('.sen');
-    for (var k = 0; k < sens.length; k++) sens[k].classList.remove('is-on');
-  }
-
-  /* 把整页正文拆句并记录每句起始偏移，供高亮与「从这句开始念」定位 */
-  function buildText(text) {
-    sentences = splitSentences(text || '');
-    offsets = []; plain = '';
-    var acc = 0;
-    for (var i = 0; i < sentences.length; i++) {
-      offsets.push(acc);
-      acc += sentences[i].length;
-    }
-    plain = sentences.join('');
-  }
-
-  /* 讲述时把背景音乐压低（ducking），讲完再缓慢回升 */
-  function bgmDuck(on) {
-    try { if (window.BGM && BGM.duck) BGM.duck(!!on); } catch (e) {}
-  }
-
-  function applyVoice(u) {
-    if (curVoice) u.voice = curVoice;
-    u.lang = (curVoice && curVoice.lang) || 'zh-CN';
-    u.rate = rate;
-    u.pitch = 1;
-    u.volume = 1;
-  }
-
-  function highlightAt(ci) {
-    var k = 0;
-    for (var i = 0; i < sentences.length; i++) {
-      if (ci >= offsets[i]) k = i; else break;
-    }
-    highlight(k);
-  }
-
-  /* 整页一次成句：引擎自带句间停顿与语调，比逐句拼接自然得多 */
-  function speakWhole(from) {
-    if (!playing || media !== 'tts') return;
-    var base = offsets[from] || 0;
-    highlight(from);
-    var u = new SpeechSynthesisUtterance(plain.slice(base));
-    applyVoice(u);
-    u.onboundary = function (e) {
-      if (typeof e.charIndex !== 'number') return;
-      boundaryHit = true;
-      highlightAt(base + e.charIndex);
-    };
-    u.onend = function () {
-      if (media !== 'tts' || !playing) return;
-      clearHL(); playing = false; paused = false; updateSayBtn(); bgmDuck(false);
-    };
-    u.onerror = function () {
-      if (media !== 'tts' || !playing) return;
-      clearHL(); playing = false; paused = false; updateSayBtn(); bgmDuck(false);
-    };
-    try { synth.speak(u); } catch (e) { stop(); return; }
-
-    /* 部分引擎（尤其 iOS Safari）不派发 boundary，高亮会僵在第一句。
-     * 1.8 秒内没有 boundary 就退回逐句播放，保证高亮仍跟着念。 */
-    setTimeout(function () {
-      if (media !== 'tts' || !playing || paused || boundaryHit || usedFallback) return;
-      usedFallback = true;
-      try { synth.cancel(); } catch (e) {}
-      speakSentence(from);
-    }, 1800);
-  }
-
-  /* 退路：逐句播放（语调略生硬，但跨浏览器最稳） */
-  function speakSentence(from) {
-    si = from;
-    if (!playing || media !== 'tts') return;
-    if (si >= sentences.length) { clearHL(); playing = false; updateSayBtn(); bgmDuck(false); return; }
-    highlight(si);
-    var u = new SpeechSynthesisUtterance(sentences[si]);
-    applyVoice(u);
-    u.onend = function () { if (!playing || media !== 'tts') return; si++; speakSentence(si); };
-    u.onerror = function () { if (!playing || media !== 'tts') return; si++; speakSentence(si); };
-    try { synth.speak(u); } catch (e) { stop(); }
-  }
-
-  /* ---- 真人录音播放：按句长比例把音频时长映射到句子上，实现同样高亮 ---- */
-  function playAudio(src, from) {
-    media = 'audio';
-    if (!audioEl) { audioEl = new Audio(); audioEl.preload = 'auto'; }
-    var tot = 0, w = 0, i;
-    for (i = 0; i < sentences.length; i++) tot += sentences[i].length;
-    for (i = 0; i < (from || 0); i++) w += sentences[i].length;
-
-    audioEl.pause();
-    audioEl.src = src;
-    audioEl.playbackRate = rate;
-    highlight(from || 0);          // 先点亮起始句，别等 timeupdate
-    if (from > 0 && tot) {
-      audioEl.onloadedmetadata = function () {
-        if (audioEl.duration) audioEl.currentTime = audioEl.duration * (w / tot);
-        audioEl.play().catch(function () {});
-      };
-    }
-    audioEl.ontimeupdate = function () {
-      if (!audioEl.duration || !tot) return;
-      var t = audioEl.currentTime / audioEl.duration, acc = 0, k = 0;
-      for (var j = 0; j < sentences.length; j++) {
-        acc += sentences[j].length / tot;
-        if (t <= acc) { k = j; break; }
-        k = j;
-      }
-      highlight(k);
-    };
-    audioEl.onended = function () {
-      if (media !== 'audio') return;
-      clearHL(); playing = false; paused = false; updateSayBtn(); bgmDuck(false);
-    };
-    try { audioEl.play().catch(function () {}); } catch (e) {}
-  }
-
-  function speakFrom(start) {
-    var p = PAGES[idx];
-    if (!p || !p.say) return;
-    buildText(p.say);
-    si = start || 0;
-    playing = true; paused = false;
-    unlocked = true;
-    if (synth) { try { synth.cancel(); } catch (e) {} }
-
-    // 该页有真人录音 → 优先放录音，合成语音只作兜底
-    var src = AUDIO[idx + 1] || AUDIO[idx];
-    if (src) { bgmDuck(true); playAudio(src, si); updateSayBtn(); return; }
-
-    if (!supported) { playing = false; updateSayBtn(); bgmDuck(false); return; }
-    media = 'tts'; boundaryHit = false; usedFallback = false;
-    bgmDuck(true);
-    updateSayBtn();
-    speakWhole(si);
-  }
-
-  function stop(keepBtn) {
-    playing = false; paused = false;
-    if (synth) { try { synth.cancel(); } catch (e) {} }
-    if (audioEl) {
-      try { audioEl.pause(); audioEl.currentTime = 0; } catch (e) {}
-    }
-    clearHL();
-    bgmDuck(false);
-    if (!keepBtn) updateSayBtn();
-  }
-
-  function toggleSay() {
-    unlocked = true;
-    if (playing && !paused) {
-      paused = true;
-      if (media === 'audio' && audioEl) { try { audioEl.pause(); } catch (e) {} }
-      else if (synth) synth.pause();
-      bgmDuck(false);
-      updateSayBtn(); return;
-    }
-    if (paused) {
-      paused = false;
-      if (media === 'audio' && audioEl) { audioEl.play().catch(function () {}); }
-      else if (synth) synth.resume();
-      bgmDuck(true);
-      updateSayBtn(); return;
-    }
-    if (!supported && !Object.keys(AUDIO).length) {
-      alert('当前浏览器不支持语音朗读，可静默阅读。');
-      return;
-    }
-    speakFrom(0);
-  }
-
-  function updateSayBtn() {
-    var hasAudio = Object.keys(AUDIO).length > 0;
-    if (!supported && !hasAudio) { btnSay.style.display = 'none'; return; }
-    btnSay.style.display = '';
-    btnSay.textContent = (playing && !paused) ? '暂停' : (paused ? '继续' : '朗读');
-    btnSay.classList.toggle('is-on', playing && !paused);
-  }
-
-  function updateHint() {
-    if (!hintEl) return;
-    var hasAudio = Object.keys(AUDIO).length > 0;
-    if (hasAudio) {
-      hintEl.textContent = '左右滑动翻页 · 键盘 ← → · 翻页后自动讲述（真人录音）';
-      return;
-    }
-    if (!supported) { hintEl.textContent = '当前设备不支持语音朗读，可静默阅读'; return; }
-    var zh = voices.filter(isZh).length;
-    var natural = curVoice && /Natural|Neural/i.test(curVoice.name);
-    hintEl.textContent = zh
-      ? '左右滑动翻页 · 键盘 ← → · 翻页后自动讲述' + (natural ? '（自然音色）' : '')
-      : '未检测到中文语音，可在系统设置中安装中文语音包';
   }
 
   /* ---------------- 渲染 ---------------- */
@@ -333,7 +77,6 @@
   }
 
   function render(p) {
-    buildText(p.say);          // 先备好句子与偏移，录音高亮与「点句起念」都依赖它
     var html = '';
     if (p.kind === 'cover') {
       html =
@@ -391,20 +134,7 @@
     if (st) st.addEventListener('click', function () {
       unlocked = true;
       go(1);
-      if (auto) setTimeout(function () { speakFrom(0); }, 420);
     });
-    // 点句即从该句讲起
-    var sens = pageEl.querySelectorAll('.sen');
-    for (var i = 0; i < sens.length; i++) {
-      (function (i) {
-        sens[i].addEventListener('click', function () {
-          if (!supported && !Object.keys(AUDIO).length) return;
-          unlocked = true;
-          if (PAGES[idx].kind === 'colophon') return;
-          speakFrom(i);
-        });
-      })(i);
-    }
   }
 
   function updateChrome() {
@@ -426,7 +156,6 @@
   function flipPrepare(dir) {
     var n = idx + dir;
     if (n < 0 || n >= TOTAL) return null;
-    stop();
     var old = snap();                 // 当前这一页
     var keep = idx;
     idx = n;
@@ -447,9 +176,6 @@
 
   function flipCommit() {
     render(PAGES[idx]);               // 纸落定：底下真正换成目标页
-    if (auto && unlocked && PAGES[idx] && PAGES[idx].kind !== 'colophon') {
-      setTimeout(function () { speakFrom(0); }, 420);
-    }
   }
 
   function flipCancel(dir) {          // 拖了一半又放回去
@@ -465,13 +191,12 @@
     // 兜底：没有翻页引擎时直接切
     var n = idx + delta;
     if (n < 0 || n >= TOTAL) return;
-    stop(); idx = n; render(PAGES[idx]); updateChrome(); flipCommit();
+    idx = n; render(PAGES[idx]); updateChrome(); flipCommit();
   }
 
   function jump(i) {
     if (i === idx) return;
     if (Math.abs(i - idx) === 1) { go(i - idx); return; }
-    stop();
     idx = i;
     render(PAGES[idx]);
     updateChrome();
@@ -493,7 +218,6 @@
         unlocked = true;
         closeSheets();
         jump(i);
-        if (auto) setTimeout(function () { speakFrom(0); }, 420);
       });
       tocEl.appendChild(b);
 
@@ -509,13 +233,9 @@
   /* ---------------- 浮层 ---------------- */
   function closeSheets() {
     document.getElementById('sheet-toc').hidden = true;
-    document.getElementById('sheet-set').hidden = true;
   }
   document.getElementById('btn-toc').addEventListener('click', function () {
     document.getElementById('sheet-toc').hidden = false;
-  });
-  document.getElementById('btn-set').addEventListener('click', function () {
-    document.getElementById('sheet-set').hidden = false;
   });
   Array.prototype.forEach.call(document.querySelectorAll('[data-close]'), function (b) {
     b.addEventListener('click', closeSheets);
@@ -524,68 +244,9 @@
     s.addEventListener('click', function (e) { if (e.target === s) s.hidden = true; });
   });
 
-  /* ---------------- 设置 ---------------- */
-  document.getElementById('set-voice').addEventListener('change', function (e) {
-    curVoice = voices.filter(function (v) { return v.name === e.target.value; })[0] || null;
-    localStorage.setItem('shanhai-voice', e.target.value);
-    if (playing) speakFrom(si);
-  });
-  document.getElementById('set-rate').addEventListener('input', function (e) {
-    rate = parseFloat(e.target.value);
-    document.getElementById('set-rate-val').textContent = rate.toFixed(2);
-    localStorage.setItem('shanhai-rate', rate);
-    if (playing && !paused) speakFrom(si);
-  });
-  document.getElementById('set-auto').addEventListener('change', function (e) {
-    auto = e.target.checked;
-    localStorage.setItem('shanhai-auto', auto ? '1' : '0');
-  });
-
-  /* 背景音乐：开关与音量 */
-  var bgmBox = document.getElementById('set-bgm');
-  var bgmVol = document.getElementById('set-bgmvol');
-  var bgmVolVal = document.getElementById('set-bgmvol-val');
-  if (bgmBox && window.BGM) {
-    bgmBox.checked = BGM.isEnabled();
-    bgmBox.addEventListener('change', function (e) { BGM.setEnabled(e.target.checked); });
-    if (bgmVol) {
-      var bv = Math.round(BGM.getVolume() * 100);
-      bgmVol.value = bv;
-      if (bgmVolVal) bgmVolVal.textContent = bv;
-      bgmVol.addEventListener('input', function (e) {
-        var v = parseInt(e.target.value, 10) || 0;
-        if (bgmVolVal) bgmVolVal.textContent = v;
-        BGM.setVolume(v / 100);
-      });
-    }
-  }
-
-  /* 纸张沙沙声与微光薄雾 */
-  var sfxBox = document.getElementById('set-sfx');
-  var mistBox = document.getElementById('set-mist');
-  if (sfxBox && window.Flip) {
-    var s0 = localStorage.getItem('shanhai-sfx');
-    sfxBox.checked = s0 !== '0';
-    Flip.sound(sfxBox.checked);
-    sfxBox.addEventListener('change', function (e) {
-      Flip.sound(e.target.checked);
-      localStorage.setItem('shanhai-sfx', e.target.checked ? '1' : '0');
-    });
-  }
-  if (mistBox && window.Flip) {
-    var m0 = localStorage.getItem('shanhai-mist');
-    mistBox.checked = m0 !== '0';
-    Flip.mist(mistBox.checked);
-    mistBox.addEventListener('change', function (e) {
-      Flip.mist(e.target.checked);
-      localStorage.setItem('shanhai-mist', e.target.checked ? '1' : '0');
-    });
-  }
-
   /* ---------------- 翻页交互 ---------------- */
   btnPrev.addEventListener('click', function () { unlocked = true; go(-1); });
   btnNext.addEventListener('click', function () { unlocked = true; go(1); });
-  btnSay.addEventListener('click', toggleSay);
 
   document.addEventListener('keydown', function (e) {
     if (e.key === 'ArrowRight' || e.key === 'PageDown') { go(1); }
@@ -632,15 +293,10 @@
   /* ---------------- 启动 ---------------- */
   var saved = parseInt(localStorage.getItem('shanhai-page') || '0', 10);
   if (saved > 0 && saved < TOTAL) idx = saved;
-  var sr = parseFloat(localStorage.getItem('shanhai-rate'));
-  if (sr) { rate = sr; document.getElementById('set-rate').value = sr; document.getElementById('set-rate-val').textContent = sr.toFixed(2); }
-  var sa = localStorage.getItem('shanhai-auto');
-  if (sa !== null) { auto = sa === '1'; document.getElementById('set-auto').checked = auto; }
 
   buildIndex();
   render(PAGES[idx]);
   updateChrome();
-  updateSayBtn();
 
   // 开场短片放完，书轻轻落定
   document.addEventListener('intro:done', function () {
@@ -648,19 +304,4 @@
     bookEl.classList.add('is-in');
     setTimeout(function () { bookEl.classList.remove('is-in'); }, 1100);
   });
-
-  if (supported) {
-    loadVoices();
-    if (typeof synth.onvoiceschanged !== 'undefined') {
-      synth.onvoiceschanged = loadVoices;
-    }
-    setTimeout(loadVoices, 400);   // 部分浏览器 voices 异步就绪
-  } else {
-    document.getElementById('set-note').textContent =
-      '当前浏览器不支持语音合成，无法启用人声讲述；文字内容可正常阅读。';
-    updateHint();
-  }
-
-  // 离开页面时停止朗读，避免后台继续发声
-  window.addEventListener('beforeunload', function () { if (supported) synth.cancel(); });
 })();
