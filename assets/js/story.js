@@ -17,8 +17,8 @@
   var castEl  = document.getElementById('cast');
   var spineEl = document.getElementById('spine');
   var stageEl = document.getElementById('stage');
-  var cornerEl = document.getElementById('corner');
-  var cornerPrevEl = document.getElementById('corner-prev');
+  var edgeLeftEl  = document.getElementById('edge-left');
+  var edgeRightEl = document.getElementById('edge-right');
   var dotsEl  = document.getElementById('dots');
   var numEl   = document.getElementById('page-num');
   var tocEl   = document.getElementById('toc');
@@ -123,11 +123,8 @@
     }
     pageEl.innerHTML = html;
 
-    // 换境 → 纸色过渡；再让这一页的内容缓缓浮出（先摘类再强制回流，动画才会重播）
+    // 换境 → 纸色过渡（纯图文绘本：不再做内容淡入浮出，落定即静止）
     pageEl.setAttribute('data-scene', sceneKey(p));
-    pageEl.classList.remove('is-in');
-    void pageEl.offsetWidth;
-    pageEl.classList.add('is-in');
     preloadAround(idx);
 
     var st = document.getElementById('btn-start');
@@ -141,8 +138,8 @@
     numEl.textContent = (idx + 1) + ' / ' + TOTAL;
     btnPrev.disabled = idx === 0;
     btnNext.disabled = idx === TOTAL - 1;
-    if (cornerEl) cornerEl.classList.toggle('is-off', idx === TOTAL - 1);
-    if (cornerPrevEl) cornerPrevEl.classList.toggle('is-off', idx === 0);
+    if (edgeLeftEl) edgeLeftEl.classList.toggle('is-off', idx === 0);
+    if (edgeRightEl) edgeRightEl.classList.toggle('is-off', idx === TOTAL - 1);
     var dots = dotsEl.children;
     for (var i = 0; i < dots.length; i++) dots[i].classList.toggle('is-on', i === idx);
     var items = tocEl.children;
@@ -258,36 +255,9 @@
   if (window.Flip) {
     Flip.init({
       stage: stageEl, book: bookEl, flip: flipEl, front: frontEl, back: backEl,
-      cast: castEl, spine: spineEl, corner: cornerEl, cornerPrev: cornerPrevEl, next: document.getElementById('next-half'),
+      cast: castEl, spine: spineEl, edgeLeft: edgeLeftEl, edgeRight: edgeRightEl, next: document.getElementById('next-half'),
       prepare: flipPrepare, commit: flipCommit, cancel: flipCancel, reveal: flipReveal
     });
-  }
-  // 书口翘角 = 翻下一页的快捷入口
-  if (cornerEl) {
-    cornerEl.addEventListener('click', function () { unlocked = true; go(1); });
-  }
-  // 左侧翘角 = 翻上一页
-  if (cornerPrevEl) {
-    cornerPrevEl.addEventListener('click', function () { unlocked = true; go(-1); });
-  }
-
-  // 不支持 Pointer Events 的老浏览器：退回"滑动一下翻一页"
-  if (!window.PointerEvent && stageEl) {
-    var tx = 0, ty = 0, tracking = false;
-    stageEl.addEventListener('touchstart', function (e) {
-      if (e.touches.length !== 1) return;
-      tx = e.touches[0].clientX; ty = e.touches[0].clientY; tracking = true;
-    }, { passive: true });
-    stageEl.addEventListener('touchend', function (e) {
-      if (!tracking) return;
-      tracking = false;
-      var t = e.changedTouches[0];
-      var dx = t.clientX - tx, dy = t.clientY - ty;
-      if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)) {
-        unlocked = true;
-        go(dx < 0 ? 1 : -1);
-      }
-    }, { passive: true });
   }
 
   /* ---------------- 启动 ---------------- */

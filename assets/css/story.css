@@ -249,21 +249,6 @@ button{font-family:var(--font)}
   filter:blur(1px);
   animation:mistUp 1.6s ease-out forwards;
 }
-/* ---------- 新的一页落定：内容和缓浮出 ---------- */
-.page.is-in .page__fig{animation:figIn .55s var(--ease) both}
-.page.is-in .page__body>*{animation:txtIn .5s var(--ease) both}
-.page.is-in .page__body>*:nth-child(2){animation-delay:.05s}
-.page.is-in .page__body>*:nth-child(3){animation-delay:.1s}
-.page.is-in .page__body>*:nth-child(n+4){animation-delay:.14s}
-/* 幅度控制在「浮出」的程度：太大反而会看成闪一下 */
-@keyframes figIn{
-  from{opacity:.45;transform:scale(.994) translateY(5px)}
-  to{opacity:1;transform:none}
-}
-@keyframes txtIn{
-  from{opacity:.5;transform:translateY(7px)}
-  to{opacity:1;transform:none}
-}
 @keyframes mistUp{
   0%{opacity:0;transform:translate(0,0) scale(.35)}
   18%{opacity:.9}
@@ -279,8 +264,6 @@ button{font-family:var(--font)}
 .flip .page *{animation:none!important;transition:none!important}
 .flip.is-turning .curl__seg,
 .flip.is-turning .seg__shade{will-change:transform,opacity}
-body.is-dragging{user-select:none;-webkit-user-select:none;cursor:grabbing}
-body.is-dragging .sen{pointer-events:none}
 
 /* ---------- 书的厚度：两侧的纸叠 ---------- */
 .stack{
@@ -294,43 +277,25 @@ body.is-dragging .sen{pointer-events:none}
 .stack--l{left:-6px;transform:skewY(-1.6deg);opacity:.75}
 .stack--r{right:-6px;transform:skewY(1.6deg);opacity:.75}
 
-/* ---------- 书口的翘角：下一页在等你 ---------- */
-.corner{
-  position:absolute;right:-1px;bottom:-1px;width:76px;height:76px;z-index:8;
+/* ---------- 左右边缘翻页热区 ----------
+ * 仅书页左右各 10% 的窄带可点击翻页；中间图文区不响应，杜绝阅读误触。
+ * 热区本身透明不可见，只在悬停/触摸时给出极淡的提示。 */
+.edge{
+  position:absolute;top:0;bottom:0;width:10%;z-index:8;
   border:0;padding:0;background:transparent;cursor:pointer;
-  transition:opacity .35s var(--ease);
+  -webkit-tap-highlight-color:transparent;
 }
-.corner[hidden]{display:none}
-.corner i{    /* 掀起的纸角 */
-  position:absolute;right:0;bottom:0;width:0;height:0;display:block;
-  border-style:solid;border-width:0 0 44px 44px;
-  border-color:transparent transparent #F3EAD4 transparent;
-  border-bottom-right-radius:4px;
-  filter:drop-shadow(-4px -4px 5px rgba(58,40,12,.3));
-  transition:border-width .28s var(--ease);
-}
-.corner u{    /* 纸角下面露出的底 */
-  position:absolute;right:0;bottom:0;width:0;height:0;display:block;
-  border-style:solid;border-width:0 0 52px 52px;
-  border-color:transparent transparent rgba(96,74,40,.28) transparent;
-  transition:border-width .28s var(--ease);
-}
-.corner:hover i,.corner:focus-visible i{border-width:0 0 58px 58px}
-.corner:hover u,.corner:focus-visible u{border-width:0 0 68px 68px}
-.corner.is-off{opacity:0;pointer-events:none}
-/* 左侧翘角：镜像上一页的快捷入口（右下角翻下一页、左下角翻上一页） */
-.corner--prev{right:auto;left:-1px;bottom:-1px}
-.corner--prev i,.corner--prev u{right:auto;left:0;transform:scaleX(-1)}
-.corner--prev i{border-bottom-right-radius:0;border-bottom-left-radius:4px}
-@media (prefers-reduced-motion:reduce){
-  .corner i,.corner u{transition:none}
-}
+.edge--left{left:0}
+.edge--right{right:0}
+.edge.is-off{pointer-events:none}
+.edge:hover{background:linear-gradient(90deg,rgba(255,255,255,.07),rgba(255,255,255,0))}
+.edge--right:hover{background:linear-gradient(270deg,rgba(255,255,255,.07),rgba(255,255,255,0))}
 
-/* 开场短片结束后，书轻轻落定 */
+/* 开场短片结束后，书轻轻落定（纯位移，不做淡入） */
 .book.is-in{animation:bookIn .9s var(--ease)}
 @keyframes bookIn{
-  from{opacity:0;transform:scale(.982) translateY(10px)}
-  to{opacity:1;transform:none}
+  from{transform:scale(.985) translateY(12px)}
+  to{transform:none}
 }
 @media (prefers-reduced-motion:reduce){
   .book.is-in{animation:none}

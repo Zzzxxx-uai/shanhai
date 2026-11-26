@@ -73,26 +73,24 @@ window.addEventListener('load', function () {
           hasPage: !!document.querySelector('#page .page__title, #page .cover, #page .colophon')
         };
 
-        // —— 按住纸往左拖，看能不能拖过去 ——
-        var book = document.getElementById('book');
-        function pe(type, x) {
+        // —— 点右侧边缘热区，看能不能翻下一页 ——
+        var right = document.getElementById('edge-right');
+        function pe(type, x, target) {
           return new PointerEvent(type, {
             bubbles: true, cancelable: true, clientX: x, clientY: 300,
             pointerType: 'mouse', button: 0, buttons: type === 'pointerup' ? 0 : 1
           });
         }
         try {
-          book.dispatchEvent(pe('pointerdown', 700));
-          book.dispatchEvent(pe('pointermove', 640));
-          book.dispatchEvent(pe('pointermove', 300));
-          o.dragMid = { hidden: f.hidden, spine: opa('spine'), rotate: f.style.transform };
-          book.dispatchEvent(pe('pointerup', 300));
-        } catch (e) { LOG.push('drag ' + e.message); }
+          right.dispatchEvent(pe('pointerdown', 900, right));
+        } catch (e) { LOG.push('edge ' + e.message); }
 
         setTimeout(function () {
-          o.afterDrag = { num: num('page-num'), hidden: f.hidden };
-          // 再往回翻一页
-          document.getElementById('btn-prev').click();
+          o.afterEdge = { num: num('page-num'), hidden: f.hidden };
+          // 再点左侧边缘热区，看能不能翻上一页
+          var left = document.getElementById('edge-left');
+          try { left.dispatchEvent(pe('pointerdown', 100, left)); }
+          catch (e) { LOG.push('edgePrev ' + e.message); }
           setTimeout(function () {
             o.afterPrev = { num: num('page-num'), hidden: f.hidden };
             o.errors = LOG;
@@ -144,7 +142,7 @@ def main():
     data = json.loads(H.unescape(m.group(1)))
     print('[probe]', os.path.basename(src_path))
     for k in ('pages', 'flip', 'els', 'segParam', 'startNum', 'mid', 'done',
-              'dragMid', 'afterDrag', 'afterPrev', 'errors'):
+              'afterEdge', 'afterPrev', 'errors'):
         if k in data:
             print('  %-10s %s' % (k, data[k]))
 
@@ -168,7 +166,7 @@ def main():
         and done.get('frontEmpty') == 0 and done.get('backEmpty') == 0
         and done.get('cast') == 0
         and done.get('hasPage')
-        and data.get('afterDrag', {}).get('num') == '3 / 25'
+        and data.get('afterEdge', {}).get('num') == '3 / 25'
         and data.get('afterPrev', {}).get('num') == '2 / 25'
         and not data.get('errors')
     )

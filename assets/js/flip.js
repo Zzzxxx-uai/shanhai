@@ -17,7 +17,7 @@
 
   var el = {}, cb = {}, segN = 7, bookW = 900, frac = 0.5;
   var busy = false, dragging = false, dir = 1;
-  var u = 0, from = 0, to = 1, t0 = 0, dur = DUR, raf = null, queued = 0;
+  var from = 0, to = 1, t0 = 0, dur = DUR, raf = null;
   var segsF = [], segsB = [], shF = [], shB = [], misted = false, revealed = false, lastB = '';
   var mistOn = true;
   var GLOW = 0.12;
@@ -188,9 +188,9 @@
       if (btf !== bookTF) { bookTF = btf; el.book.style.transform = btf; }
     }
 
-    // 翻页一开始就把书口的翘角藏起来，别跟纸打架
-    if (el.corner) el.corner.style.visibility = t < 0.04 ? '' : 'hidden';
-    if (el.cornerPrev) el.cornerPrev.style.visibility = t < 0.04 ? '' : 'hidden';
+    // 翻页一开始就停用左右边缘热区，别跟翻动的纸打架
+    if (el.edgeLeft) el.edgeLeft.style.visibility = t < 0.04 ? '' : 'hidden';
+    if (el.edgeRight) el.edgeRight.style.visibility = t < 0.04 ? '' : 'hidden';
 
     if (!misted && uu > 0.1) { misted = true; mist(); }
   }
@@ -265,15 +265,13 @@
     if (el.book) el.book.style.transform = '';
     if (el.cast) { el.cast.style.opacity = 0; el.cast.style.width = ''; }
     if (el.spine) el.spine.style.opacity = mistOn ? GLOW : 0;
-    if (el.corner) el.corner.style.visibility = '';
-    if (el.cornerPrev) el.cornerPrev.style.visibility = '';
+    if (el.edgeLeft) el.edgeLeft.style.visibility = '';
+    if (el.edgeRight) el.edgeRight.style.visibility = '';
     if (el.next) { el.next.style.visibility = 'hidden'; el.next.innerHTML = ''; }
     segsF = []; segsB = []; shF = []; shB = [];
     misted = false; revealed = false; lastB = '';
     if (done) { if (cb.commit) cb.commit(dir); }
     else { if (cb.cancel) cb.cancel(dir); }
-    // 动画期间点的下一页不丢，落定后接着翻
-    if (queued) { var q = queued; queued = 0; go(q); }
   }
 
   /* ---------- 准备：把当前页铺在纸的一面、目标页铺在另一面 ---------- */
@@ -309,76 +307,40 @@
   }
 
   /* ---------- 对外：整页翻动 ---------- */
+  /* 翻页动画未结束时，直接忽略二次翻页请求（不排队），
+   * 从根上杜绝「纸卡在半翻 / 连翻跳页」的 bug。 */
   function go(d) {
-    if (busy) { queued = d; return; }
+    if (busy) return;
     if (!prepare(d)) return;
     if (reduce) { finish(true); return; }      // 用户要求减少动效
     if (frozen >= 0) { apply(frozen); return; } // ?freeze=.45 把纸停在半途，方便看效果
     run(0, 1, DUR);
   }
 
-  /* ---------- 对外：按住纸拖动 ---------- */
-  function beginDrag(d) {
-    if (busy) return false;
-    if (!prepare(d)) return false;
-    dragging = true; busy = true;
-    dir = d;
-    return true;
-  }
-  function dragTo(pp) {
-    if (!dragging) return;
-    u = clamp(pp, 0, 1);
-    apply(u);
-  }
-  function endDrag() {
-    if (!dragging) return;
-    dragging = false;
-    if (u >= 0.34) run(u, 1, Math.max(220, DUR * (1 - u)));
-    else if (u > 0.001) run(u, 0, Math.max(180, DUR * u));
-    else finish(false);
-  }
-
-  /* ---------- 拖动绑定 ---------- */
-  var dragX = 0, dragW = 1, pending = false;
-
-  function interactive(t) {
-    if (!t || !t.closest) return false;
-    return !!t.closest('button,a,input,select,textarea,.sen,.sheet,.nav');
-  }
-
-  function bindDrag() {
-    var stage = el.stage;
-    if (!stage) return;
-    stage.addEventListener('pointerdown', function (e) {
-      if (e.button != null && e.button !== 0) return;
-      if (interactive(e.target)) return;
-      dragX = e.clientX;
-      dragW = (el.book && el.book.getBoundingClientRect().width) || window.innerWidth;
-      pending = true;
-    });
-    stage.addEventListener('pointermove', function (e) {
-      if (!pending && !dragging) return;
-      var dx = e.clientX - dragX;
-      if (!dragging) {
-        if (Math.abs(dx) < 14) return;
-        var d = dx < 0 ? 1 : -1;
-        if (!beginDrag(d)) { pending = false; return; }
-        try { document.body.classList.add('is-dragging'); } catch (err) {}
-      }
-      dragTo(Math.abs(dx) / (dragW * 0.82));
-      if (e.cancelable) e.preventDefault();
-    });
-    function up(e) {
-      if (dragging) {
-        endDrag();
-        // 拖完这一下，别让 click 再触发按钮
-        setTimeout(function () { try { document.body.classList.remove('is-dragging'); } catch (err) {} }, 30);
-      }
-      pending = false;
+  /* ---------- 边缘热区点击翻页 ----------
+   * 只允许点击书页左右边缘（各约 10% 宽）触发翻页，中间图文区不响应，
+   * 彻底避免阅读时误触翻页。右缘翻下一页、左缘翻上一页。 */
+  function bindEdges() {
+    var left = el.edgeLeft, right = el.edgeRight;
+    function onTap(d) {
+      return function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        go(d);                       // busy 时 go() 内部直接忽略，天然防连点
+      };
     }
-    stage.addEventListener('pointerup', up);
-    stage.addEventListener('pointercancel', up);
-    stage.addEventListener('pointerleave', up);
+    if (left) {
+      left.addEventListener('pointerdown', function (e) {
+        if (e.button != null && e.button !== 0) return;
+        onTap(-1)(e);
+      });
+    }
+    if (right) {
+      right.addEventListener('pointerdown', function (e) {
+        if (e.button != null && e.button !== 0) return;
+        onTap(1)(e);
+      });
+    }
   }
 
   window.Flip = {
@@ -398,7 +360,7 @@
       // 弱机起步就降压，别等到第一场翻完再降
       var cores = navigator.hardwareConcurrency || 4;
       if (cores <= 4 && n > 5) n = 5;
-      bindDrag();
+      bindEdges();
     },
     go: go,
     busy: function () { return busy; },
