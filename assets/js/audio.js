@@ -26,7 +26,10 @@
   var BGM_MP3 = 'assets/audio/bgm.mp3';
 
   var STORE_KEY = 'shanhai-sound';
-  var MUSIC_VOL = 0.17;      // 背景乐：只做底，不抢画面
+  // 背景乐初始音量：0.34 = 满幅的 34%（要求 30%–40% 区间）。
+  // 素材本身已把峰值限在 0.35，两者相乘约 0.119（-18.5 dBFS），
+  // 距 0 dBFS 有 18 dB 余量，任何设备都不会削波爆音。
+  var MUSIC_VOL = 0.34;
   var MUSIC_FADE = 2.4;      // 起播淡入，避免"突然开始"
   var BGM_LOOP = 64.0;       // 素材正好 64s：循环点钉在这儿，顺带截掉编码器补的静音
 
@@ -39,7 +42,7 @@
   var mode = 'pending';          // pending | buffer | element | none
   var unlocked = false, loading = false, started = false;
 
-  var ctx = null, master = null, musicGain = null, analyser = null;
+  var ctx = null, master = null, musicGain = null, analyser = null, limiter = null;
   var musicBuf = null, musicRaw = null;
   var musicNode = null;
 
@@ -79,10 +82,21 @@
     try { ctx = new AC(); } catch (e) { return null; }
     master = ctx.createGain();
     master.gain.value = enabled ? 1 : 0;
+    // 总线上串一道软限幅：阈值 -10 dBFS 以上才动作，正常音量（约 -18.5 dBFS）
+    // 完全不碰它，只在极端情况下（设备增益、系统音效叠加）挡住削波，杜绝爆音。
+    limiter = ctx.createDynamicsCompressor();
+    try {
+      limiter.threshold.value = -10;
+      limiter.knee.value = 0;
+      limiter.ratio.value = 20;
+      limiter.attack.value = 0.003;
+      limiter.release.value = 0.25;
+    } catch (e) {}
     // 串一个分析器在总线上：只为了调试时能量一下"到底有没有出声"，不影响声音
     analyser = ctx.createAnalyser();
     analyser.fftSize = 2048;
-    master.connect(analyser);
+    master.connect(limiter);
+    limiter.connect(analyser);
     analyser.connect(ctx.destination);
 
     musicGain = ctx.createGain();
@@ -276,10 +290,12 @@
   if (btn) btn.addEventListener('click', function () { toggle(); });
   applyEnabled();
 
-  /* 页面一加载就开始取音频，不等用户点 */
-  if (document.readyState === 'complete') preload();
-  else window.addEventListener('load', preload);
-  setTimeout(preload, 1500);            // 兜底：load 被拖住时也补一次
+  /* 立刻开始取音频，不等用户点，也不等插画加载完。
+     原来挂在 window.load 上 —— 那要等十几张重彩插画全部加载完才触发，
+     音频往往十几秒后才开始取，首屏听着就是"半天没声"，点击后又容易半路接上。
+     脚本在 body 末尾同步执行，此时 DOM 已解析完，直接取最划算。 */
+  preload();
+  setTimeout(preload, 1200);            // 兜底：第一次没成功就再补一次（内部有防重入）
 
   /* ---------------- 调试 ---------------- */
   window.BookAudio = {

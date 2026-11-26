@@ -66,8 +66,9 @@ def fade(x, sr, attack=0.005, release=0.02):
     return x
 
 
-def env_ar(n, attack, release, sr=32000):
+def env_ar(n, attack, release, sr=None):
     """线性/S 形起落包络，两端只在需要时生效。"""
+    sr = SR if sr is None else sr
     env = np.ones(n)
     a = min(int(attack * sr), n // 2)
     r = min(int(release * sr), n // 2)
@@ -105,7 +106,7 @@ def encode(src_wav, dst, codec_args):
 # --------------------------------------------------------------------------- #
 # 二、背景纯音乐：古琴 + 箫
 # --------------------------------------------------------------------------- #
-SR = 32000
+SR = 44100
 BEAT = 1.0                 # 一拍 1 秒（60 BPM）
 LOOP = 64.0                # 16 小节 × 4 拍
 CYCLES = 3
@@ -174,12 +175,13 @@ def qin(midi, vel=0.4, slide=0.0, pos=None, dur=None, bright=1.0, vib=None):
         if k <= 10:
             x += dec * 0.38 * np.sin(k * phase2 + rng.uniform(0.0, 6.2832))
 
-    # 指甲擦弦的一瞬（很轻，只让音头立得住）
-    an = int(0.025 * SR)
+    # 指甲擦弦的一瞬（很轻，只让音头立得住）。
+    # 电平刻意压得很低：这一层是宽带噪声，稍大一点在手机上就会听成"沙沙"的杂音。
+    an = int(0.022 * SR)
     if an < n:
         atk = fft_filter(rng.standard_normal(an) * np.hanning(an), SR,
-                         lo=900, hi=5200)
-        x[:an] += atk * (0.070 if pos < 0.4 else 0.024)
+                         lo=800, hi=4200)
+        x[:an] += atk * (0.026 if pos < 0.4 else 0.010)
 
     x /= max(1e-9, np.max(np.abs(x)))
     return fade(x * vel, SR, 0.0015, 0.06)
@@ -199,9 +201,9 @@ def xiao(midi, dur=4.0, vel=0.16, bend=0.0, entry=0.022):
     phase = 2.0 * np.pi * np.cumsum(freq) / SR
 
     x = np.sin(phase) + 0.20 * np.sin(2 * phase + 0.35) + 0.07 * np.sin(3 * phase + 1.2)
-    breath = fft_filter(rng.standard_normal(n), SR, lo=1300, hi=6800)
+    breath = fft_filter(rng.standard_normal(n), SR, lo=1300, hi=6000)
     breath *= 0.30 + 0.70 * np.exp(-t / 0.85)                   # 气声在音头最多
-    x = x + breath * 0.42
+    x = x + breath * 0.24
 
     x /= max(1e-9, np.max(np.abs(x)))
     return x * env_ar(n, 0.50, min(1.4, dur * 0.45)) * vel
@@ -278,7 +280,9 @@ XIAO = [
 ]
 
 # 低音持续：(拍, 音高, 振幅)。第二段从 31.5s 起，与第一段交叠 2.5s，不断层。
-DRONES = [(0.0, 38, 0.052), (31.5, 38, 0.052)]
+# 振幅压在 0.018 以下：73Hz 在手机与笔记本小喇叭上放不出来，只会变成互调失真，
+# 听感就是"嗡嗡的杂音"。宁可薄一点，也不要这层放不出的低频。
+DRONES = [(0.0, 38, 0.018), (31.5, 38, 0.018)]
 
 
 def make_bgm():
@@ -309,38 +313,42 @@ def make_bgm():
             add(dry, xiao(m, dur=dur, vel=vel, bend=bend),
                 base + beat * BEAT + rng.uniform(-0.02, 0.02))
 
-    # ---- 混响：指数衰减噪声做脉冲响应，高频收得比低频快 ----
-    ir_len = 3.6
+    # ---- 混响：指数衰减噪声做脉冲响应 ----
+    # 这层最容易留"沙沙"：噪声 IR 卷出来的尾巴是宽带噪声，乐句之间没有信号时
+    # 它仍在响。所以 IR 收短（2.8s）、衰减加快（0.62）、高频砍到 3400，
+    # 末尾再强制淡出到绝对零，湿声只占 42%——宁可干一点，也不要噪声地板。
+    ir_len = 2.8
     ni = int(ir_len * SR)
     ti = np.arange(ni) / SR
-    ir = rng.standard_normal(ni) * np.exp(-ti / 0.85)
-    ir = fft_filter(ir, SR, lo=130, hi=4200, order=2)
-    pd = int(0.022 * SR)                              # pre-delay：让直达声先出来
+    ir = rng.standard_normal(ni) * np.exp(-ti / 0.62)
+    ir = fft_filter(ir, SR, lo=140, hi=3400, order=2)
+    ir[-int(0.35 * SR):] *= np.linspace(1.0, 0.0, int(0.35 * SR)) ** 2   # 尾巴收到零
+    pd = int(0.020 * SR)                              # pre-delay：让直达声先出来
     ir = np.concatenate([np.zeros(pd), ir])
-    ir[:pd + int(0.014 * SR)] *= 1.0
-    ir[pd:pd + int(0.014 * SR)] *= np.linspace(0, 1, int(0.014 * SR))
+    ir[pd:pd + int(0.012 * SR)] *= np.linspace(0, 1, int(0.012 * SR))
     ir /= np.sqrt(np.sum(ir ** 2)) + 1e-9
 
-    Nfft = 1 << (len(dry) + ni - 1).bit_length()
+    Nfft = 1 << (len(dry) + len(ir) - 1).bit_length()
     wet = np.fft.irfft(np.fft.rfft(dry, Nfft) * np.fft.rfft(ir, Nfft), Nfft)
     wet = wet[:len(dry) + len(ir) - 1]
 
     mix = np.zeros(len(wet))
     mix[:len(dry)] += dry
-    mix += wet * 0.62
+    mix += wet * 0.42
 
     # ---- 取中间那一遍循环 ----
     n_loop = int(LOOP * SR)
     loop = mix[n_loop:n_loop * 2].copy()
 
-    # 收尾修形：去掉次声，柔化最刺的高频
-    loop = fft_filter(loop, SR, lo=62, hi=11000, order=2)
+    # 收尾修形：60Hz 以下一律切掉（喇叭放不出、只会吃掉动态余量），高频柔化
+    loop = fft_filter(loop, SR, lo=72, hi=12000, order=3)
 
-    # 按整体能量定响度（古琴瞬态尖、平均值低，只按峰值归一会显得虚）
-    loop *= 0.115 / max(1e-9, rms(loop))
+    # 定响度：按 RMS 归（古琴瞬态尖、平均值低，只按峰值归一会显得虚），
+    # 再把峰值限在 0.35 —— 留足 9dB 余量，任何设备都不会削波爆音。
+    loop *= 0.058 / max(1e-9, rms(loop))
     pk = float(np.max(np.abs(loop)))
-    if pk > 0.82:
-        loop *= 0.82 / pk
+    if pk > 0.35:
+        loop *= 0.35 / pk
     return loop, SR
 
 
@@ -352,9 +360,9 @@ def main():
     bgm, sr2 = make_bgm()
     write_wav(tmp + '_bgm.wav', bgm, sr2)
     s2 = encode(tmp + '_bgm.wav', os.path.join(OUT, 'bgm.mp3'),
-                ['-c:a', 'libmp3lame', '-b:a', '96k', '-ac', '1', '-ar', '32000'])
+                ['-c:a', 'libmp3lame', '-b:a', '128k', '-ac', '1', '-ar', '44100'])
     s3 = encode(tmp + '_bgm.wav', os.path.join(OUT, 'bgm.ogg'),
-                ['-c:a', 'libvorbis', '-q:a', '3', '-ac', '1', '-ar', '32000'])
+                ['-c:a', 'libvorbis', '-q:a', '4', '-ac', '1', '-ar', '44100'])
     # 循环点是否连续：末 5ms 与首 5ms 的跳变
     jump = float(np.max(np.abs(bgm[:220] - bgm[-220:])))
     print('时长 %.2fs  峰值 %.2f  整体 %.1f dBFS  接缝跳变 %.3f'

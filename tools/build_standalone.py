@@ -72,8 +72,12 @@ io.open(OUT_HTML, 'w', encoding='utf-8').write(html)
 # 4) 顺手打个 zip（保留原目录结构，解压后双击 index.html 也能跑）
 with zipfile.ZipFile(OUT_ZIP, 'w', zipfile.ZIP_DEFLATED) as z:
     for root, dirs, files in os.walk(BASE):
-        # 排除目录本身：.git 会让体积翻倍并泄出仓库对象，tools 是开发脚本
-        dirs[:] = [d for d in dirs if d not in ('.git', 'tools', '__pycache__', '_probe')]
+        # 排除目录本身：.git 会让体积翻倍并泄出仓库对象，tools 是开发脚本；
+        # 下划线开头的目录放的是调试产物（_preview 试听页、_genimg 生图中间件等），
+        # 一律不进交付包 —— 之前漏了这条，5MB 试听素材被打进了压缩包
+        dirs[:] = [d for d in dirs
+                   if d not in ('.git', 'tools', '__pycache__', '_probe')
+                   and not d.startswith('_')]
         if 'tools' in root or '_probe' in root:
             continue
         for f in files:
