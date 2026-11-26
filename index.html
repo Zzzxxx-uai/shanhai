@@ -1,201 +1,118 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<meta name="description" content="《山海舆图·先民观》—— 一款以《山海经》为基底的可交互博物舆图 H5">
-<title>山海舆图 · 先民观</title>
-<link rel="stylesheet" href="assets/css/style.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>山海舆图 · 先民观｜有声绘本</title>
+<meta name="description" content="以《山海经》为基底的有声绘本电子书，翻页即有人声讲述，水墨淡彩插画。">
+<link rel="stylesheet" href="assets/css/story.css">
 </head>
 <body>
 
-<!-- 墨迹粒子背景（全局，轻量） -->
-<canvas id="ink-canvas" aria-hidden="true"></canvas>
-
-<!-- ============ 首页：古本启卷 ============ -->
-<section class="page page--cover is-active" id="page-cover">
-  <div class="cover__bg"></div>
-  <div class="cover__inner">
-    <p class="cover__eyebrow">全国大学生数字媒体科技作品及创意竞赛</p>
-    <h1 class="cover__title">山海舆图</h1>
-    <p class="cover__subtitle">· 先民观 ·</p>
-    <p class="cover__en">SHAN HAI YU TU · XIAN MIN GUAN</p>
-    <p class="cover__desc">循着先民的足迹，在数字世界里<br>读懂华夏先民敬畏自然、探索天地的精神</p>
-    <button class="btn-seal" id="btn-open">启 卷</button>
-    <p class="cover__hint">点击启卷，展开这部沉睡千年的博物舆图</p>
-  </div>
-  <div class="cover__corner cover__corner--tl"></div>
-  <div class="cover__corner cover__corner--tr"></div>
-  <div class="cover__corner cover__corner--bl"></div>
-  <div class="cover__corner cover__corner--br"></div>
-</section>
-
-<!-- ============ 山海舆图：核心主界面 ============ -->
-<section class="page page--map" id="page-map">
-  <div class="scroll-viewport" id="viewport">
-    <div class="scroll-track" id="track">
-
-      <!-- 远景：长卷底图（跟随滚动，横向平铺） -->
-      <div class="layer layer--paper" data-speed="1"></div>
-
-      <!-- 远山剪影 -->
-      <div class="layer layer--far" data-speed="0.25">
-        <svg viewBox="0 0 1200 300" preserveAspectRatio="none">
-          <path d="M0 230 L90 150 L180 215 L280 120 L390 205 L480 160 L600 225 L710 140 L820 210 L930 155 L1040 220 L1130 165 L1200 225 L1200 300 L0 300 Z"/>
-        </svg>
-      </div>
-
-      <!-- 中山剪影 -->
-      <div class="layer layer--mid" data-speed="0.55">
-        <svg viewBox="0 0 1200 300" preserveAspectRatio="none">
-          <path d="M0 265 L120 205 L230 258 L350 190 L470 250 L580 200 L700 258 L810 195 L930 252 L1050 205 L1160 255 L1200 230 L1200 300 L0 300 Z"/>
-        </svg>
-      </div>
-
-      <!-- 舆图节点（位置由 app.js 依视差速度换算） -->
-      <div class="layer layer--nodes" data-speed="0.8" id="node-layer">
-        <!-- 卷末标记：让末尾的留白成为「未知之境」，而非看起来没加载完 -->
-        <div class="end-mark" aria-hidden="true">
-          <span class="end-mark__line">大荒之外</span>
-          <span class="end-mark__seal">未 知</span>
-        </div>
-      </div>
-
-      <!-- 近景坡岸 -->
-      <div class="layer layer--near" data-speed="1">
-        <svg viewBox="0 0 1200 300" preserveAspectRatio="none">
-          <path d="M0 288 L150 262 L300 285 L450 258 L600 284 L750 260 L900 286 L1050 262 L1200 285 L1200 300 L0 300 Z"/>
-        </svg>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- 顶部标题栏 -->
-  <header class="map-head">
-    <div class="map-head__title">山海舆图 · 先民观</div>
-    <div class="map-head__stat" id="stat-count" aria-live="polite">已识 0 / 15</div>
-    <nav class="map-head__nav">
-      <button class="btn-ghost" data-goto="timeline">时间线</button>
-      <button class="btn-ghost" data-goto="ending">结语</button>
-    </nav>
-  </header>
-
-  <!-- 底部进度与提示 -->
-  <footer class="map-foot">
-    <div class="map-foot__progress"><span id="progress-bar"></span></div>
-    <p class="map-foot__hint" id="map-hint">横向滚动或拖动，循着先民的足迹游历山海 · 点击发光节点解锁知识</p>
-  </footer>
-</section>
-
-<!-- ============ 时间线 ============ -->
-<section class="page page--timeline" id="page-timeline">
-  <div class="tl-wrap">
-    <header class="tl-head">
-      <h2>古籍流传与活化</h2>
-      <p>从《山海经》古本，到今天被重新打开的方式</p>
-    </header>
-    <ol class="tl-list" id="tl-list"></ol>
-    <p class="tl-note">以上为通识性脉络梳理，不涉具体年份考订。</p>
-    <div class="tl-actions">
-      <button class="btn-ghost" data-goto="map">返回舆图</button>
-      <button class="btn-ghost" data-goto="ending">结语</button>
-    </div>
-  </div>
-</section>
-
-<!-- ============ 结语 ============ -->
-<section class="page page--ending" id="page-ending">
-  <div class="ed-wrap">
-    <p class="ed-eyebrow">回响</p>
-    <h2 class="ed-title" id="ed-title"></h2>
-    <div class="ed-lines" id="ed-lines"></div>
-    <!-- 此行所遇：把看过的异兽回响一遍，未看满则提示还差几只 -->
-    <div class="ed-met" id="ed-met"></div>
-    <div class="ed-tags" id="ed-tags"></div>
-    <div class="ed-actions">
-      <button class="btn-seal btn-seal--sm" id="btn-restart">重 游</button>
-      <button class="btn-ghost" data-goto="map">回到舆图</button>
-    </div>
-  </div>
-</section>
-
-<!-- ============ 知识卡弹层 ============ -->
-<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-  <div class="modal__mask" data-close></div>
-  <article class="modal__card" id="modal-card">
-    <button class="modal__close" data-close aria-label="关闭">×</button>
-
-    <!-- ============ 视图一：地点 · 该境全部异兽 ============ -->
-    <section class="mv mv--place" id="view-place">
-      <header class="kc-head">
-        <p class="kc-eyebrow" id="kc-source"></p>
-        <h3 class="kc-title" id="modal-title"></h3>
-        <p class="kc-focus" id="kc-focus"></p>
-        <p class="kc-intro" id="kc-intro"></p>
-      </header>
-
-      <div class="pl-bar">
-        <span class="pl-count" id="pl-count"></span>
-        <span class="pl-tip">点一只，看它的故事</span>
-      </div>
-      <ul class="beast-grid" id="beast-grid"></ul>
-
-      <footer class="kc-foot">
-        <p>同境异兽按《山海经》原文出处编排，「博物对照」为对照参考；兽名旁所注读音，参考《汉语大字典》《现代汉语词典》等工具书。</p>
-      </footer>
-
-      <nav class="kc-nav">
-        <button class="btn-ghost btn-ghost--sm" id="kc-prev">← 上一处</button>
-        <span class="kc-nav__pos" id="kc-pos"></span>
-        <button class="btn-ghost btn-ghost--sm" id="kc-next">下一处 →</button>
-      </nav>
-    </section>
-
-    <!-- ============ 视图二：异兽 · 故事与考据 ============ -->
-    <section class="mv mv--beast" id="view-beast">
-      <button class="mv-back" id="beast-back">
-        <span class="mv-back__arrow">←</span>
-        <span>返回<em id="back-place"></em></span>
-      </button>
-
-      <!-- 异兽主图：640×640 白描，按大图呈现 -->
-      <figure class="kc-beast">
-        <div class="kc-beast__frame">
-          <img id="kc-img" alt="" loading="lazy">
-        </div>
-        <figcaption class="kc-beast__meta">
-          <div class="kc-beast__name"><span id="kc-beast-name"></span><em class="kc-beast__py" id="kc-beast-py"></em></div>
-          <p class="kc-beast__row"><span>出自</span><em id="kc-beast-at"></em></p>
-          <p class="kc-beast__row"><span>博物对照</span><em id="kc-beast-zoology"></em></p>
-          <p class="kc-beast__row"><span>先民猜想</span><em id="kc-beast-guess"></em></p>
-        </figcaption>
-      </figure>
-
-      <!-- 先民故事：据记载推演，须与古籍原文区分 -->
-      <div class="story">
-        <h4 class="story__title">先民的故事</h4>
-        <p class="story__text" id="story-text"></p>
-        <p class="story__note">据《山海经》记载推演的情景化叙述，非古籍原文。</p>
-      </div>
-
-      <ol class="kc-layers" id="kc-layers"></ol>
-
-      <footer class="kc-foot">
-        <p>「博物对照」为当代知识对接的合理推测，标注为对照参考，不与古籍原文混淆。</p>
-      </footer>
-
-      <nav class="kc-nav">
-        <button class="btn-ghost btn-ghost--sm" id="beast-prev">← 上一只</button>
-        <span class="kc-nav__pos" id="beast-pos"></span>
-        <button class="btn-ghost btn-ghost--sm" id="beast-next">下一只 →</button>
-      </nav>
-    </section>
-  </article>
+<!-- 开场展卷短片 -->
+<div class="intro" id="intro" hidden>
+  <video class="intro__v" id="intro-video" data-src="assets/video/intro.mp4"
+         playsinline muted preload="auto"></video>
+  <div class="intro__veil"></div>
+  <button class="intro__skip" id="intro-skip" type="button">跳过 · 直接展卷</button>
 </div>
 
-<script src="assets/js/data.js"></script>
-<script src="assets/js/ink-particles.js"></script>
-<script src="assets/js/app.js"></script>
+<div class="app">
+
+  <header class="bar">
+    <div class="bar__brand">山海舆图 <em>先民观</em></div>
+    <div class="bar__tools">
+      <button class="tbtn tbtn--say" id="btn-say" type="button">朗读</button>
+      <button class="tbtn" id="btn-toc" type="button">目录</button>
+      <button class="tbtn" id="btn-set" type="button">设置</button>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+    <button class="nav nav--prev" id="btn-prev" type="button" aria-label="上一页">‹</button>
+
+    <div class="book" id="book">
+      <i class="stack stack--l" aria-hidden="true"></i>
+      <div class="book__base" id="base">
+        <article class="page" id="page"></article>
+      </div>
+      <div class="book__next" id="next-half"></div>
+      <div class="book__cast" id="cast"></div>
+      <div class="book__spine" id="spine"></div>
+      <div class="flip" id="flip" hidden>
+        <div class="flip__face flip__front" id="flip-front"></div>
+        <div class="flip__face flip__back" id="flip-back"></div>
+      </div>
+      <i class="stack stack--r" aria-hidden="true"></i>
+      <button class="corner" id="corner" type="button" aria-label="翻到下一页"><i></i><u></u></button>
+    </div>
+
+    <button class="nav nav--next" id="btn-next" type="button" aria-label="下一页">›</button>
+  </main>
+
+  <footer class="foot">
+    <div class="foot__inner">
+      <span class="foot__num" id="page-num">1 / 25</span>
+      <div class="dots" id="dots"></div>
+      <span class="foot__hint" id="foot-hint">左右滑动翻页 · 键盘 ← →</span>
+    </div>
+  </footer>
+
+</div>
+
+<!-- 目录 -->
+<div class="sheet" id="sheet-toc" hidden>
+  <div class="sheet__box">
+    <div class="sheet__head"><span>目录</span><button class="sheet__x" data-close type="button">×</button></div>
+    <div class="toc" id="toc"></div>
+  </div>
+</div>
+
+<!-- 设置 -->
+<div class="sheet" id="sheet-set" hidden>
+  <div class="sheet__box">
+    <div class="sheet__head"><span>朗读与音乐</span><button class="sheet__x" data-close type="button">×</button></div>
+    <div class="set">
+      <label class="set__row">
+        <span>讲述声音</span>
+        <select id="set-voice"></select>
+      </label>
+      <label class="set__row">
+        <span>语速</span>
+        <input type="range" id="set-rate" min="0.6" max="1.4" step="0.1" value="0.95">
+        <b id="set-rate-val">0.95</b>
+      </label>
+      <label class="set__row set__row--check">
+        <input type="checkbox" id="set-auto" checked>
+        <span>翻页后自动讲述</span>
+      </label>
+      <label class="set__row set__row--check">
+        <input type="checkbox" id="set-bgm" checked>
+        <span>背景音乐（讲述时自动压低）</span>
+      </label>
+      <label class="set__row">
+        <span>音乐音量</span>
+        <input type="range" id="set-bgmvol" min="0" max="100" step="5" value="30">
+        <b id="set-bgmvol-val">30</b>
+      </label>
+      <label class="set__row set__row--check">
+        <input type="checkbox" id="set-sfx" checked>
+        <span>翻页的纸张沙沙声</span>
+      </label>
+      <label class="set__row set__row--check">
+        <input type="checkbox" id="set-mist" checked>
+        <span>翻页时的山海微光与薄雾</span>
+      </label>
+      <p class="set__note" id="set-note">翻页效果为实时三维演算：纸张按段弯曲、随光照明暗、落页有回弹；可在网址后加 ?seg=1 关闭弯曲（省性能）。</p>
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/pages.js"></script>
+<script src="assets/js/audio-map.js"></script>
+<script src="assets/js/bgm.js"></script>
+<script src="assets/js/flip.js"></script>
+<script src="assets/js/intro.js"></script>
+<script src="assets/js/story.js"></script>
 </body>
 </html>

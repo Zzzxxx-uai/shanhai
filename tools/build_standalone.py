@@ -19,7 +19,9 @@ def data_uri(rel):
         return rel
     ext = os.path.splitext(p)[1].lower().lstrip('.')
     mime = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
-            'webp': 'image/webp', 'svg': 'image/svg+xml'}.get(ext, 'image/jpeg')
+            'webp': 'image/webp', 'svg': 'image/svg+xml',
+            'mp3': 'audio/mpeg', 'm4a': 'audio/mp4', 'aac': 'audio/aac',
+            'ogg': 'audio/ogg', 'wav': 'audio/wav', 'webm': 'audio/webm'}.get(ext, 'image/jpeg')
     raw = open(p, 'rb').read()
     uri = 'data:%s;base64,%s' % (mime, base64.b64encode(raw).decode('ascii'))
     _cache[rel] = uri
@@ -44,10 +46,11 @@ html = re.sub(r'<link rel="stylesheet" href="([^"]+)">', css_sub, html)
 def js_sub(m):
     src = m.group(1)
     js = io.open(os.path.join(BASE, src.replace('/', os.sep)), encoding='utf-8').read()
-    # JS 里的图片路径统一补成 data URI（data.js 的 img 字段形如 'assets/img/xxx.jpg'）
+    # JS 里的资源路径统一补成 data URI（img 字段形如 'assets/img/xxx.jpg'，
+    # 录音映射形如 'assets/audio/p01.mp3'）
     def u(sub):
         return "'" + data_uri(sub.group(1)) + "'"
-    js = re.sub(r"'(assets/img/[^']+)'", u, js)
+    js = re.sub(r"'((?:assets/img/|assets/audio/)[^']+)'", u, js)
     return '<script>\n' + js + '\n</script>'
 html = re.sub(r'<script src="([^"]+)"></script>', js_sub, html)
 
@@ -56,11 +59,21 @@ def img_sub(m):
     return 'src="' + data_uri(m.group(1)) + '"'
 html = re.sub(r'src="(assets/img/[^"]+)"', img_sub, html)
 
+# 3.5) 背景音乐：没放外置 bgm.mp3 时关掉查找，免去运行时一次无效请求
+if not os.path.exists(os.path.join(BASE, 'assets', 'audio', 'bgm.mp3')):
+    if "window.BGM_FILE || 'assets/audio/bgm.mp3'" in html:
+        html = html.replace("window.BGM_FILE || 'assets/audio/bgm.mp3'", 'null')
+
+# 3.6) 开场视频太大（约 10MB），单文件版不内嵌：置空后 intro.js 会自动跳过短片
+html = html.replace('data-src="assets/video/intro.mp4"', 'data-src=""')
+
 io.open(OUT_HTML, 'w', encoding='utf-8').write(html)
 
 # 4) 顺手打个 zip（保留原目录结构，解压后双击 index.html 也能跑）
 with zipfile.ZipFile(OUT_ZIP, 'w', zipfile.ZIP_DEFLATED) as z:
     for root, dirs, files in os.walk(BASE):
+        # 排除目录本身：.git 会让体积翻倍并泄出仓库对象，tools 是开发脚本
+        dirs[:] = [d for d in dirs if d not in ('.git', 'tools', '__pycache__', '_probe')]
         if 'tools' in root or '_probe' in root:
             continue
         for f in files:

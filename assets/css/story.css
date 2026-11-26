@@ -1,0 +1,416 @@
+/* ===========================================================
+ * 《山海舆图 · 先民观》有声绘本 · 样式
+ * 电子书：宣纸书页 + 翻页动效 + 讲述高亮
+ * =========================================================== */
+:root{
+  /* 色调整体提亮：宣纸更白更暖，墨色更深以拉开对比，朱色提饱和 */
+  --paper:#FDFAF1;      /* 宣纸 */
+  --paper-2:#FFFFFC;
+  --ink:#241C14;        /* 墨 */
+  --ink-soft:#4E3F31;   /* 比原先更深，读起来更清楚 */
+  --ink-faint:#87755F;
+  --red:#B43527;        /* 朱 */
+  --line:rgba(43,33,24,.12);
+  --line-2:rgba(43,33,24,.24);
+  --desk:#2E2519;       /* 承托书页的桌面（原先太黑，压得画面发闷） */
+  --ease:cubic-bezier(.22,.61,.36,1);
+  --font:"Songti SC","STSong","Noto Serif SC","Source Han Serif SC",serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;font-family:var(--font);color:var(--ink);
+  background:
+    radial-gradient(130% 100% at 50% 0%,#443728 0%,var(--desk) 58%,#221A12 100%);
+  -webkit-font-smoothing:antialiased;
+}
+button{font-family:var(--font)}
+
+/* ---------- 布局 ---------- */
+.app{height:100%;display:flex;flex-direction:column}
+.bar{
+  flex:0 0 auto;display:flex;align-items:center;gap:14px;
+  padding:12px 18px;padding-top:calc(12px + env(safe-area-inset-top));
+  color:#E8DFD0;border-bottom:1px solid rgba(255,255,255,.08);
+}
+.bar__brand{font-size:15px;letter-spacing:.18em;text-indent:.18em}
+.bar__brand em{font-style:normal;color:#C9B79C;margin-left:8px;font-size:12px;letter-spacing:.24em}
+.bar__tools{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.tbtn{
+  font-size:13px;letter-spacing:.1em;color:#E8DFD0;
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.16);
+  border-radius:2px;padding:6px 14px;cursor:pointer;transition:.25s var(--ease);
+  -webkit-tap-highlight-color:transparent;
+}
+.tbtn:hover{background:rgba(255,255,255,.14)}
+.tbtn--say{color:var(--paper-2);background:var(--red);border-color:var(--red);min-width:74px}
+.tbtn--say:hover{background:#B03326}
+.tbtn--say.is-on{background:#4A6B4F;border-color:#4A6B4F}
+
+.stage{
+  flex:1 1 auto;display:flex;align-items:center;justify-content:center;
+  gap:8px;padding:20px 10px;position:relative;min-height:0;overflow:hidden;
+}
+.nav{
+  flex:0 0 auto;width:46px;height:76px;font-size:30px;line-height:1;
+  color:#D8CBB8;background:rgba(255,255,255,.05);
+  border:1px solid rgba(255,255,255,.14);border-radius:3px;cursor:pointer;
+  transition:.25s var(--ease);-webkit-tap-highlight-color:transparent;
+}
+.nav:hover{background:rgba(255,255,255,.14)}
+.nav[disabled]{opacity:.25;cursor:default}
+@media (max-width:720px){
+  .nav{position:absolute;bottom:6px;height:44px;width:44px;font-size:24px;z-index:5}
+  .nav--prev{left:10px}.nav--next{right:10px}
+  .stage{padding-bottom:58px}
+}
+
+/* ---------- 书页 ---------- */
+.book{
+  flex:1 1 auto;max-width:1040px;height:100%;max-height:640px;
+  position:relative;perspective:1700px;transform-style:preserve-3d;
+  will-change:transform;
+}
+.book__base{position:relative;height:100%;z-index:1}
+.page{
+  height:100%;background:var(--scene-tint,var(--paper));border-radius:3px;
+  /* 场景色调变化由 CSS 过渡，不占 JS 每帧的时间 */
+  transition:background-color .8s var(--ease);
+  box-shadow:0 16px 44px rgba(48,34,14,.36),0 2px 0 rgba(255,255,255,.1) inset;
+  overflow:hidden;position:relative;
+  display:grid;grid-template-columns:1.05fr .95fr;
+}
+/* 五境各有底色：换境时纸色缓缓过渡过去（值都很淡，不喧宾夺主） */
+.page[data-scene="xu"]   {--scene-tint:#FDFAF1}
+.page[data-scene="dong"] {--scene-tint:#F6FBF2}   /* 东方苍木：微青 */
+.page[data-scene="xi"]   {--scene-tint:#FDF6E7}   /* 西方金风：暖金 */
+.page[data-scene="bei"]  {--scene-tint:#F4FAFC}   /* 北方玄水：微蓝 */
+.page[data-scene="nan"]  {--scene-tint:#FEF4EF}   /* 南方丹火：微朱 */
+.page[data-scene="man"]  {--scene-tint:#F7F4EE}   /* 蛮荒：灰褐 */
+.page[data-scene="wei"]  {--scene-tint:#FCF8EE}
+.page::after{  /* 装订阴影（原先偏重，压着书脊发暗） */
+  content:'';position:absolute;left:0;top:0;bottom:0;width:34px;
+  background:linear-gradient(90deg,rgba(0,0,0,.11),rgba(0,0,0,0));
+  pointer-events:none;
+}
+@media (max-width:860px){
+  .page{grid-template-columns:1fr;grid-template-rows:auto 1fr;overflow-y:auto;max-height:none}
+  .book{max-height:none;height:auto}
+  .stage{align-items:flex-start}
+}
+
+/* 图 */
+.page__fig{
+  position:relative;background:linear-gradient(160deg,#FCF6E7,#FFFFFA);
+  display:flex;align-items:center;justify-content:center;padding:26px;
+  border-right:1px solid var(--line);overflow:hidden;
+}
+@media (max-width:860px){.page__fig{border-right:none;border-bottom:1px solid var(--line);padding:18px}}
+.page__fig img{
+  max-width:100%;max-height:100%;object-fit:contain;
+  /* 稍稍提亮并提高饱和：插画的青绿赭石更跳出来（仅在静止页，翻页时会被降级） */
+  filter:brightness(1.035) saturate(1.15) contrast(1.02) drop-shadow(0 6px 14px rgba(43,33,24,.13));
+}
+.page__figcap{
+  position:absolute;left:22px;bottom:16px;
+  font-size:12px;letter-spacing:.16em;color:var(--ink-faint);
+}
+@media (max-width:860px){.page__figcap{position:static;margin-top:10px;text-align:center}}
+
+/* 文 */
+.page__body{
+  padding:38px 40px 34px;display:flex;flex-direction:column;
+  overflow-y:auto;
+}
+@media (max-width:860px){.page__body{padding:22px 20px 26px;overflow:visible}}
+.page__chapter{
+  font-size:12px;letter-spacing:.3em;text-indent:.3em;color:var(--red);margin-bottom:10px;
+}
+.page__title{
+  font-size:27px;letter-spacing:.16em;text-indent:.16em;line-height:1.35;margin:0 0 4px;
+}
+.page__title .py{font-size:13px;letter-spacing:.04em;color:var(--ink-faint);margin-left:10px}
+.page__place{font-size:12px;letter-spacing:.18em;color:var(--ink-faint);margin-bottom:18px}
+.page__say{
+  font-size:16.5px;line-height:2.15;letter-spacing:.04em;color:var(--ink-soft);
+  margin:6px 0 0;text-align:justify;
+}
+@media (max-width:860px){.page__say{font-size:16px;line-height:2.05}}
+.sen{transition:background .3s var(--ease),color .3s var(--ease);border-radius:2px}
+.sen.is-on{background:rgba(180,53,39,.14);color:var(--ink);box-shadow:0 0 0 3px rgba(180,53,39,.14)}
+.page__tag{
+  margin-top:16px;font-size:11.5px;letter-spacing:.1em;color:var(--ink-faint);
+  border-left:2px solid var(--red);padding-left:10px;
+}
+.page__note{margin-top:auto;padding-top:18px}
+@media (max-width:860px){.page__note{margin-top:20px}}
+.note{
+  border-top:1px solid var(--line);padding:12px 0 0;margin-top:12px;
+}
+.note__k{
+  font-size:11px;letter-spacing:.24em;color:var(--red);display:block;margin-bottom:5px;
+}
+.note__v{font-size:13px;line-height:1.95;color:var(--ink-soft);letter-spacing:.02em}
+
+/* 封面 */
+.page--cover{
+  grid-template-columns:1fr;place-items:center;text-align:center;
+  background:linear-gradient(160deg,#F6EFDD 0%,#EFE4CC 100%);
+}
+.cover{max-width:560px;padding:34px 28px}
+.cover__img{
+  width:min(300px,52vw);height:min(300px,52vw);object-fit:cover;
+  border-radius:2px;box-shadow:0 10px 30px rgba(43,33,24,.28);margin-bottom:26px;
+}
+.cover__t{font-size:40px;letter-spacing:.3em;text-indent:.3em;margin:0}
+.cover__s{font-size:13px;letter-spacing:.4em;text-indent:.4em;color:var(--ink-faint);margin:14px 0 0}
+.cover__rule{width:56px;height:1px;background:var(--line-2);margin:22px auto}
+.cover__d{font-size:14px;line-height:2;color:var(--ink-soft);letter-spacing:.05em;text-align:justify}
+.cover__go{
+  margin-top:26px;font-size:15px;letter-spacing:.3em;text-indent:.3em;
+  color:var(--paper-2);background:var(--red);border:none;border-radius:2px;
+  padding:12px 34px;cursor:pointer;transition:.25s var(--ease);
+}
+.cover__go:hover{background:#B03326}
+
+/* 考据页 */
+.page--colophon{grid-template-columns:1fr;overflow-y:auto}
+.colophon{max-width:640px;margin:0 auto;padding:38px 32px}
+.colophon__t{font-size:24px;letter-spacing:.2em;text-indent:.2em;margin:0 0 22px}
+.colo{border-top:1px solid var(--line);padding:14px 0}
+.colo__k{font-size:12px;letter-spacing:.24em;color:var(--red);margin-bottom:6px}
+.colo__v{font-size:13.5px;line-height:2;color:var(--ink-soft)}
+
+/* ---------- 翻页：仿实体书 ---------- */
+/* 翻页期间提前露出的"下一页"半边（跨页书：纸离开右半后右半先换；回翻则左半先换） */
+.book__next{
+  position:absolute;top:0;bottom:0;z-index:2;visibility:hidden;overflow:hidden;
+}
+.book__next.is-right{left:50%;right:0}
+.book__next.is-left{left:0;right:50%}
+.book__next-in{position:absolute;top:0;height:100%}
+.book__next.is-right .book__next-in{left:-100%;width:200%}
+.book__next.is-left .book__next-in{left:0;width:200%}
+
+.book__cast{          /* 翻起的纸落在下面一页上的影子 */
+  /* 渐变写死在这儿，方向与长度交给 scaleX（纯合成，不重绘）：
+     靠书脊一端最浓，向自由端渐淡；向左时 scaleX(-1) 镜像即可。 */
+  position:absolute;left:50%;top:0;bottom:0;width:50%;z-index:2;
+  transform-origin:left center;pointer-events:none;opacity:0;
+  background:linear-gradient(90deg,rgba(60,42,20,.5) 0%,rgba(60,42,20,.2) 42%,rgba(60,42,20,0) 100%);
+  filter:blur(7px);
+}
+@media (max-width:860px){   /* 窄屏单页：纸从左边起，影子铺满整幅 */
+  .book__cast{left:0;width:100%}
+}
+.book__spine{         /* 书缝里溢出的青金山海微光 */
+  position:absolute;left:-14px;top:4%;bottom:4%;width:58px;z-index:5;
+  pointer-events:none;opacity:.16;mix-blend-mode:screen;
+  background:
+    radial-gradient(58% 46% at 12% 50%,rgba(168,238,214,.55) 0%,rgba(168,238,214,0) 72%),
+    radial-gradient(44% 56% at 26% 38%,rgba(236,206,128,.42) 0%,rgba(236,206,128,0) 70%);
+  filter:blur(2px);
+}
+.flip{
+  /* 桌面跨页书：翻的纸 = 右半页，绕书脊（中线）转 */
+  position:absolute;left:50%;right:0;top:0;bottom:0;z-index:3;
+  transform-origin:left center;transform-style:preserve-3d;
+}
+.flip.is-turning{will-change:transform}   /* 只在这一张纸翻动时提示合成器 */
+@media (max-width:860px){
+  .flip{left:0}   /* 窄屏单页：整页绕左缘转 */
+}
+.flip[hidden]{display:none}
+.flip__face{position:absolute;inset:0;transform-style:preserve-3d}
+.flip__back{
+  transform-origin:left center;   /* 必须同绕书脊，否则纸的背面会错位 */
+  transform:rotateY(180deg);
+}
+.flip__face::after{  /* 纸张切口（书口一侧）：能看见"厚度"的一小条 */
+  content:'';position:absolute;right:0;top:0;bottom:0;width:3px;
+  background:linear-gradient(270deg,#FFFDF6 0%,#EADFC4 60%,rgba(234,223,196,0) 100%);
+}
+
+/* 纸条：首尾相接，各自绕左缘转一点，连起来就是卷曲的纸 */
+.curl{position:absolute;inset:0;transform-style:preserve-3d;transform-origin:left center}
+.curl__seg{
+  position:absolute;top:0;bottom:0;
+  transform-origin:left center;transform-style:preserve-3d;
+  background:var(--paper);
+}
+.seg__clip{position:absolute;inset:-1px;overflow:hidden}   /* 外扩1px：相邻纸条互相搭接，消掉接缝 */
+.seg__body{position:absolute;top:0;height:100%}
+.seg__shade{position:absolute;inset:0;background:#120C06;opacity:0;pointer-events:none}
+
+/* 薄雾粒子 */
+.mist{
+  position:absolute;display:block;border-radius:50%;pointer-events:none;opacity:0;
+  background:radial-gradient(circle,rgba(207,243,230,.95) 0%,rgba(150,215,196,.4) 42%,rgba(150,215,196,0) 72%);
+  filter:blur(1px);
+  animation:mistUp 1.6s ease-out forwards;
+}
+/* ---------- 新的一页落定：内容和缓浮出 ---------- */
+.page.is-in .page__fig{animation:figIn .55s var(--ease) both}
+.page.is-in .page__body>*{animation:txtIn .5s var(--ease) both}
+.page.is-in .page__body>*:nth-child(2){animation-delay:.05s}
+.page.is-in .page__body>*:nth-child(3){animation-delay:.1s}
+.page.is-in .page__body>*:nth-child(n+4){animation-delay:.14s}
+/* 幅度控制在「浮出」的程度：太大反而会看成闪一下 */
+@keyframes figIn{
+  from{opacity:.45;transform:scale(.994) translateY(5px)}
+  to{opacity:1;transform:none}
+}
+@keyframes txtIn{
+  from{opacity:.5;transform:translateY(7px)}
+  to{opacity:1;transform:none}
+}
+@keyframes mistUp{
+  0%{opacity:0;transform:translate(0,0) scale(.35)}
+  18%{opacity:.9}
+  100%{opacity:0;transform:translate(-16px,-130px) scale(1.6)}
+}
+/* ---------- 翻页期间的性能降级 ----------
+ * 纸的正面背面各被复制了 segN 份（默认 7×2 = 14 份整页内容），
+ * 每帧都得光栅化这 14 份；贵的效果在翻页时一律卸掉，静止时再给回。
+ * 这一处省下的开销，比其它微调加起来都多。 */
+.flip .page{box-shadow:none;transition:none}
+.flip .page__fig img{filter:none}                 /* 14 份 drop-shadow + 色彩矩阵，最贵的一项 */
+.flip .page::after{background:linear-gradient(90deg,rgba(0,0,0,.1),rgba(0,0,0,0))}
+.flip .page *{animation:none!important;transition:none!important}
+.flip.is-turning .curl__seg,
+.flip.is-turning .seg__shade{will-change:transform,opacity}
+body.is-dragging{user-select:none;-webkit-user-select:none;cursor:grabbing}
+body.is-dragging .sen{pointer-events:none}
+
+/* ---------- 书的厚度：两侧的纸叠 ---------- */
+.stack{
+  position:absolute;top:5px;bottom:5px;width:7px;z-index:0;pointer-events:none;
+  background:
+    repeating-linear-gradient(90deg,
+      #E9DFC8 0px, #F7F0DE 1.4px, #C9BC9F 2.6px, #E9DFC8 3.5px);
+  border-radius:2px;
+  box-shadow:0 10px 26px rgba(0,0,0,.42);
+}
+.stack--l{left:-6px;transform:skewY(-1.6deg);opacity:.75}
+.stack--r{right:-6px;transform:skewY(1.6deg);opacity:.75}
+
+/* ---------- 书口的翘角：下一页在等你 ---------- */
+.corner{
+  position:absolute;right:-1px;bottom:-1px;width:76px;height:76px;z-index:8;
+  border:0;padding:0;background:transparent;cursor:pointer;
+  transition:opacity .35s var(--ease);
+}
+.corner[hidden]{display:none}
+.corner i{    /* 掀起的纸角 */
+  position:absolute;right:0;bottom:0;width:0;height:0;display:block;
+  border-style:solid;border-width:0 0 44px 44px;
+  border-color:transparent transparent #F3EAD4 transparent;
+  border-bottom-right-radius:4px;
+  filter:drop-shadow(-4px -4px 5px rgba(58,40,12,.3));
+  transition:border-width .28s var(--ease);
+}
+.corner u{    /* 纸角下面露出的底 */
+  position:absolute;right:0;bottom:0;width:0;height:0;display:block;
+  border-style:solid;border-width:0 0 52px 52px;
+  border-color:transparent transparent rgba(96,74,40,.28) transparent;
+  transition:border-width .28s var(--ease);
+}
+.corner:hover i,.corner:focus-visible i{border-width:0 0 58px 58px}
+.corner:hover u,.corner:focus-visible u{border-width:0 0 68px 68px}
+.corner.is-off{opacity:0;pointer-events:none}
+@media (prefers-reduced-motion:reduce){
+  .corner i,.corner u{transition:none}
+}
+
+/* 开场短片结束后，书轻轻落定 */
+.book.is-in{animation:bookIn .9s var(--ease)}
+@keyframes bookIn{
+  from{opacity:0;transform:scale(.982) translateY(10px)}
+  to{opacity:1;transform:none}
+}
+@media (prefers-reduced-motion:reduce){
+  .book.is-in{animation:none}
+  .mist{display:none}
+}
+
+/* ---------- 页脚 ---------- */
+.foot{
+  flex:0 0 auto;padding:10px 18px calc(10px + env(safe-area-inset-bottom));
+  border-top:1px solid rgba(255,255,255,.08);
+}
+.foot__inner{display:flex;align-items:center;gap:16px;max-width:1040px;margin:0 auto}
+.foot__num{font-size:12px;letter-spacing:.14em;color:#C9B79C;flex:0 0 auto}
+.dots{display:flex;gap:5px;flex:1 1 auto;overflow-x:auto;padding:4px 0;scrollbar-width:none}
+.dots::-webkit-scrollbar{display:none}
+.dot{
+  flex:0 0 auto;width:7px;height:7px;border-radius:50%;padding:0;border:none;
+  background:rgba(255,255,255,.22);cursor:pointer;transition:.25s var(--ease);
+}
+.dot.is-on{background:var(--red);transform:scale(1.5)}
+.foot__hint{font-size:11px;color:#8C7F6E;flex:0 0 auto}
+@media (max-width:720px){.foot__hint{display:none}}
+
+/* ---------- 浮层 ---------- */
+.sheet{
+  position:fixed;inset:0;z-index:40;background:rgba(12,9,6,.72);
+  display:flex;align-items:center;justify-content:center;padding:20px;
+}
+.sheet[hidden]{display:none}
+.sheet__box{
+  background:var(--paper);border-radius:3px;max-width:620px;width:100%;
+  max-height:78vh;display:flex;flex-direction:column;
+  box-shadow:0 20px 60px rgba(0,0,0,.6);
+}
+.sheet__head{
+  display:flex;align-items:center;padding:14px 20px;border-bottom:1px solid var(--line);
+}
+.sheet__head span{font-size:15px;letter-spacing:.24em;text-indent:.24em}
+.sheet__x{
+  margin-left:auto;background:none;border:none;font-size:26px;line-height:1;
+  color:var(--ink-faint);cursor:pointer;padding:0 4px;
+}
+.toc{overflow-y:auto;padding:14px 16px 20px;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.toc__i{
+  text-align:left;background:none;border:1px solid var(--line);border-radius:2px;
+  padding:9px 12px;cursor:pointer;font-size:13.5px;color:var(--ink-soft);
+  display:flex;gap:8px;align-items:baseline;transition:.2s var(--ease);
+}
+.toc__i:hover{background:rgba(156,43,33,.08);border-color:var(--line-2)}
+.toc__i.is-on{border-color:var(--red);color:var(--ink)}
+.toc__n{font-size:11px;color:var(--ink-faint);flex:0 0 auto}
+.set{padding:18px 20px 22px}
+.set__row{display:flex;align-items:center;gap:14px;margin-bottom:16px;font-size:14px}
+.set__row>span:first-child{flex:0 0 84px;color:var(--ink-soft);letter-spacing:.1em}
+.set__row select{
+  flex:1 1 auto;font-family:var(--font);font-size:13px;padding:7px 10px;
+  border:1px solid var(--line-2);border-radius:2px;background:var(--paper-2);color:var(--ink);
+}
+.set__row input[type=range]{flex:1 1 auto}
+.set__row b{font-size:12px;color:var(--ink-faint);font-weight:400;flex:0 0 34px}
+.set__row--check{gap:8px}
+.set__note{
+  font-size:12px;line-height:1.9;color:var(--ink-faint);
+  border-top:1px solid var(--line);padding-top:14px;margin:0;
+}
+
+/* ---------- 开场展卷 ---------- */
+.intro{
+  position:fixed;inset:0;z-index:60;background:#0C0906;
+  display:flex;align-items:center;justify-content:center;
+  transition:opacity .85s var(--ease);
+}
+.intro[hidden]{display:none}
+.intro.is-out{opacity:0;pointer-events:none}
+.intro__v{width:100%;height:100%;object-fit:cover;display:block}
+.intro__veil{
+  position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(130% 100% at 50% 45%,rgba(0,0,0,0) 52%,rgba(8,6,4,.58) 100%);
+}
+.intro__skip{
+  position:absolute;right:22px;bottom:calc(22px + env(safe-area-inset-bottom));
+  font-family:var(--font);font-size:13px;letter-spacing:.22em;text-indent:.22em;
+  color:#E8DFD0;background:rgba(255,255,255,.08);
+  border:1px solid rgba(255,255,255,.24);border-radius:2px;
+  padding:9px 18px;cursor:pointer;transition:.25s var(--ease);
+}
+.intro__skip:hover{background:rgba(255,255,255,.18)}

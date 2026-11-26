@@ -28,19 +28,42 @@ SITE = "https://zzzxxx-uai.github.io/shanhai/"
 GIT = r"C:/Users/zhouy/.workbuddy/vendor/PortableGit/mingw64/bin/git.exe"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-EXCLUDE_DIRS = {".git", "__pycache__", ".workbuddy", "node_modules"}
+EXCLUDE_DIRS = {".git", "__pycache__", ".workbuddy", "node_modules", "_genimg", "_legacy_art", "录音"}
 EXCLUDE_EXT = {".pyc", ".tmp", ".log"}
 
 
+# token 文件优先级最高：放在工程目录之外，部署时不会被上传到仓库
+TOKEN_FILES = [
+    os.path.join(os.path.dirname(ROOT), ".workbuddy", "gh_token"),
+    os.path.join(os.path.expanduser("~"), ".workbuddy", "gh_token"),
+]
+
+
 def get_token():
-    """从 Git 凭证管理器取出用户已授权的 token（不弹窗、不联网交互）"""
+    """取 token：先读本地 token 文件，再退回 Git 凭证管理器
+
+    本机 github.com:443 常被重置（git 推不上去），但 api.github.com 可达，
+    所以实际部署走 Contents/Git Data API，只需要一个 PAT 即可，与网络环境无关。
+    """
+    for fp in TOKEN_FILES:
+        if os.path.isfile(fp):
+            with open(fp, "r", encoding="utf-8", errors="ignore") as f:
+                tk = f.read().strip()
+            if tk:
+                return tk
+
     p = subprocess.run([GIT, "credential", "fill"],
                        input="protocol=https\nhost=github.com\n\n",
                        capture_output=True, text=True, cwd=ROOT)
     for line in p.stdout.splitlines():
         if line.startswith("password="):
             return line.split("=", 1)[1].strip()
-    sys.exit("取不到 GitHub 凭证：请先在 PowerShell 里成功执行一次 git push 完成授权")
+
+    sys.exit(
+        "取不到 GitHub 凭证。请在 GitHub 生成 PAT 后保存到：\n  "
+        + TOKEN_FILES[0]
+        + "\n或先在 PowerShell 里成功执行一次 git push 完成授权（需勾选 Always use）。"
+    )
 
 
 TOKEN = None
@@ -70,6 +93,9 @@ def local_files():
         dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIRS]
         for fn in filenames:
             if fn.startswith("_") or os.path.splitext(fn)[1] in EXCLUDE_EXT:
+                continue
+            # 单文件版与 zip 是离线交付物（4~5MB/次），不放进仓库，免得每次部署都重传
+            if fn.startswith("山海舆图"):
                 continue
             abs_p = os.path.join(dirpath, fn)
             rel = os.path.relpath(abs_p, ROOT).replace("\\", "/")
@@ -105,23 +131,35 @@ def main():
         if remote.get(rel) != sha:
             changed.append((rel, abs_p, "新增" if rel not in remote else "修改"))
 
+    # 远端有、本地已删除的文件 -> 从仓库移除（保持线上与本地一致）
+    for rel in sorted(remote):
+        if rel not in files:
+            changed.append((rel, None, "删除"))
+
     print("本地文件 %d 个，远端 %d 个" % (len(files), len(remote)))
     if not changed:
         print("无改动，无需同步。站点：%s" % SITE)
         return
     print("变更 %d 个：" % len(changed))
     for rel, abs_p, kind in changed:
-        print("  [%s] %s  (%.0f KB)" % (kind, rel, os.path.getsize(abs_p) / 1024))
+        size = "(删除)" if abs_p is None else "(%.0f KB)" % (os.path.getsize(abs_p) / 1024)
+        print("  [%s] %s  %s" % (kind, rel, size))
     if dry:
         print("--dry-run：未提交")
         return
 
     # 只把变化的文件放进新 tree；未变化的文件由 base tree 自动继承
+    # 二进制（jpg 等）必须走 blobs API 以 base64 上传，不能塞进 content
     entries = []
-    for rel, abs_p, _ in changed:
+    for rel, abs_p, kind in changed:
+        if kind == "删除":
+            entries.append({"path": rel, "mode": "100644", "type": "blob", "sha": None})
+            continue
         with open(abs_p, "rb") as f:
-            content = f.read().decode("utf-8")
-        entries.append({"path": rel, "mode": "100644", "type": "blob", "content": content})
+            raw = f.read()
+        blob = api("POST", "/repos/%s/git/blobs" % REPO,
+                   {"content": base64.b64encode(raw).decode("ascii"), "encoding": "base64"})
+        entries.append({"path": rel, "mode": "100644", "type": "blob", "sha": blob["sha"]})
 
     new_tree = api("POST", "/repos/%s/git/trees" % REPO,
                    {"base_tree": base_commit, "tree": entries})

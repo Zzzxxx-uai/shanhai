@@ -1,0 +1,22 @@
+# 单文件版与压缩包：体积大，由 tools/build_standalone.py 生成，不入仓库
+山海舆图-先民观.html
+山海舆图-先民观.zip
+
+# 真人录音源文件与本地说明：体积大，导入后产物在 assets/audio/（按需决定是否入仓库）
+录音/
+
+# 开发探针产物
+_probe*.html
+_probe*.txt
+
+# 图像生成原始产物（PNG 大图）与旧版素材备份：不进仓库
+tools/_genimg/
+tools/_legacy_art/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 系统文件
+.DS_Store
+Thumbs.db
