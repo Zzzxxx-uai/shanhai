@@ -11,6 +11,7 @@ _probe*.txt
 
 # 图像生成原始产物（PNG 大图）与旧版素材备份：不进仓库
 tools/_genimg/
+tools/_genimg_dunhuang/
 tools/_legacy_art/
 
 # Python 缓存

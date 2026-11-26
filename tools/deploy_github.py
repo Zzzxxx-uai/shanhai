@@ -28,7 +28,7 @@ SITE = "https://zzzxxx-uai.github.io/shanhai/"
 GIT = r"C:/Users/zhouy/.workbuddy/vendor/PortableGit/mingw64/bin/git.exe"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-EXCLUDE_DIRS = {".git", "__pycache__", ".workbuddy", "node_modules", "_genimg", "_legacy_art", "录音"}
+EXCLUDE_DIRS = {".git", "__pycache__", ".workbuddy", "node_modules", "_genimg", "_legacy_art", "_genimg_dunhuang", "录音"}
 EXCLUDE_EXT = {".pyc", ".tmp", ".log"}
 
 
