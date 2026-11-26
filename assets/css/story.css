@@ -124,6 +124,13 @@ button{font-family:var(--font)}
   /* 稍稍提亮并提高饱和：插画的青绿赭石更跳出来（仅在静止页，翻页时会被降级） */
   filter:brightness(1.035) saturate(1.15) contrast(1.02) drop-shadow(0 6px 14px rgba(43,33,24,.13));
 }
+/* 显影：图没到之前先隐住，露出的是纸色而不是一块白；到了再淡进来。
+   只动 opacity，不参与布局，不影响任何尺寸与位置。 */
+.page__fig img,.cover__img{
+  background:linear-gradient(160deg,#F4EBD8 0%,#E9DDC5 100%);
+}
+.page__fig img.is-loading,.cover__img.is-loading{opacity:0}
+.page__fig img.is-ready,.cover__img.is-ready{opacity:1;transition:opacity .22s ease}
 .page__figcap{
   position:absolute;left:22px;bottom:16px;
   font-size:12px;letter-spacing:.16em;color:var(--ink-faint);

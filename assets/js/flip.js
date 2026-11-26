@@ -85,6 +85,7 @@
     el.flip.hidden = false;
     el.front.innerHTML = page.html;
     el.back.innerHTML = '';
+    if (window.__imgHarden) window.__imgHarden(el.front);   // 纸上那面也走显影逻辑
     if (page.scroll) {                       // 纸是从滚动到一半的那一页揭下来的
       var a = el.front.querySelector('.page');
       var b = el.front.querySelector('.page__body');

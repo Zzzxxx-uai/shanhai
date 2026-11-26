@@ -66,29 +66,86 @@
   }
 
   /* ---------------- 预加载 ----------------
-   * 当前页显示时就把下一页（以及再下一页）的图取下来并解码，
-   * 翻过去时直接命中缓存，不会先白一下再出图。 */
-  var preloaded = {};
-  function preload(src) {
+   * 用户翻得快时，下一页的图常常还没下完，翻过去就是一片空白。
+   * 这里做三件事：
+   *   1) 队列化：最多 3 张同时在途，不跟当前页抢带宽，也不把浏览器并发打满；
+   *   2) 保留 Image 引用：以前只记一个 1，Image 对象会被回收，解码好的位图也随之丢掉，
+   *      新建的 <img> 还得从头解一遍；现在留住引用，同一张图第二次用几乎零成本；
+   *   3) 全书排队：打开就把 24 张按页序取下来（越靠前越优先），
+   *      整本 3.3MB，读完封面这几秒前面几页基本都到位了。 */
+  var preloaded = {};            // src -> Image（0 表示"已排队、还没取完"）
+  /* 并发 3 是量出来的：4 个一起取，总带宽被摊薄，队首那张反而更慢到；
+   * 3 个既能吃满带宽，又不至于把"下一页"排到别的图后面。 */
+  var queue = [], bus = 0, MAX_BUS = 3, allQueued = false;
+
+  function imgReady(src) {
+    var im = preloaded[src];
+    return !!(im && im.complete && im.naturalWidth > 0);
+  }
+
+  function pump() {
+    while (bus < MAX_BUS && queue.length) {
+      var src = queue.shift();
+      bus++;
+      (function (src) {
+        var im = new Image();
+        im.decoding = 'async';
+        var fin = function () {
+          bus--;
+          preloaded[src] = im;
+          if (im.decode) { try { im.decode().catch(function () {}); } catch (e) {} }
+          pump();
+        };
+        im.onload = fin;
+        im.onerror = fin;                 // 失败也放行，别把队列卡死
+        im.src = src;
+      })(src);
+    }
+  }
+
+  function enqueue(src, urgent) {
     if (!src || preloaded[src]) return;
-    preloaded[src] = 1;
-    var im = new Image();
-    im.decoding = 'async';
-    im.src = src;
-    if (im.decode) { try { im.decode().catch(function () {}); } catch (e) {} }
+    preloaded[src] = 0;                   // 占位：已在队列里
+    if (urgent) queue.unshift(src); else queue.push(src);
+    pump();
   }
 
   function preloadAround(i) {
-    if (PAGES[i + 1]) preload(PAGES[i + 1].img);      // 下一页优先
-    if (PAGES[i - 1]) preload(PAGES[i - 1].img);
-    // 再远的一页放到空闲时段，别跟当前页抢带宽
-    var far = function () {
-      if (PAGES[i + 2]) preload(PAGES[i + 2].img);
-      if (PAGES[i - 2]) preload(PAGES[i - 2].img);
-    };
-    if (window.requestIdleCallback) window.requestIdleCallback(far, { timeout: 1200 });
-    else setTimeout(far, 300);
+    /* unshift 是插到队首，所以最后入队的最先下载 ——
+     * 这里要倒着写：越先会翻到的，越往后写，才排得越前。 */
+    if (PAGES[i - 2]) enqueue(PAGES[i - 2].img, true);     // 回翻两页（最不急）
+    if (PAGES[i + 3]) enqueue(PAGES[i + 3].img, true);
+    if (PAGES[i - 1]) enqueue(PAGES[i - 1].img, true);
+    if (PAGES[i + 2]) enqueue(PAGES[i + 2].img, true);
+    if (PAGES[i + 1]) enqueue(PAGES[i + 1].img, true);     // 下一页最急，排最前
+
+    if (!allQueued) {                     // 其余按页序排在后面，空闲时慢慢取完
+      allQueued = true;
+      for (var k = 0; k < TOTAL; k++) {
+        var j = (i + k) % TOTAL;
+        if (PAGES[j] && PAGES[j].img) enqueue(PAGES[j].img, false);
+      }
+    }
   }
+
+  /* 图片显影：没就绪的先隐住（底下是纸色，不是白），load 完再淡进来。
+   * 覆盖底页与翻页纸上那一面，避免任何时刻出现一块刺眼的空白。 */
+  function harden(root) {
+    if (!root) return;
+    var ims = root.querySelectorAll('img');
+    for (var i = 0; i < ims.length; i++) {
+      (function (im) {
+        if (im.complete && im.naturalWidth) { im.className += ' is-ready'; return; }
+        im.className += ' is-loading';
+        var done = function () {
+          im.className = im.className.replace(/\s*is-loading/, '') + ' is-ready';
+        };
+        im.addEventListener('load', done, { once: true });
+        im.addEventListener('error', done, { once: true });
+      })(ims[i]);
+    }
+  }
+  window.__imgHarden = harden;             // 翻页引擎铺完纸后会调一次
 
   /* ---------------- 一页的标记 ----------------
    * pageMarkup 只产出字符串，渲染与"翻页用的纸"共用同一份内容，
@@ -146,6 +203,7 @@
     pageEl.className = m.cls;
     pageEl.setAttribute('data-scene', m.scene);
     pageEl.innerHTML = m.html;
+    harden(pageEl);                 // 未就绪的图先隐住，load 完淡入
 
     var st = document.getElementById('btn-start');
     if (st) st.addEventListener('click', function () {
@@ -217,13 +275,45 @@
     savePage();
   }
 
+  /* 翻页前的"等图门"：翻页只有 380ms，目标页的图若还在路上，
+   * 纸上那一面必然是空的。这里最多等 260ms —— 只吃掉"最后那一段"，
+   * 真没下完就不等了，交给占位与淡入兜底，绝不把点击拖成卡顿。 */
+  var gateOpen = true, queuedDir = 0;
+
   function go(delta) {
     if (Math.abs(delta) !== 1) { jump(idx + delta); return; }
-    if (window.Flip) { Flip.go(delta > 0 ? 1 : -1); return; }
-    // 兜底：没有翻页引擎时直接切
-    var n = idx + delta;
-    if (n < 0 || n >= TOTAL) return;
-    idx = n; render(PAGES[idx]); updateChrome(); savePage();
+
+    if (!window.Flip) {                          // 没有翻页引擎时直接切
+      var n = idx + delta;
+      if (n < 0 || n >= TOTAL) return;
+      idx = n; render(PAGES[idx]); updateChrome(); savePage();
+      return;
+    }
+
+    var dir = delta > 0 ? 1 : -1;
+    if (!gateOpen) { queuedDir = dir; return; }  // 门还没开：连点只记一次
+
+    var t = PAGES[idx + dir];
+    if (!t || !t.img || imgReady(t.img)) { Flip.go(dir); return; }
+
+    gateOpen = false;
+    enqueue(t.img, true);                        // 把要翻到的那张提到队首
+    // 开卷那一下多等一会儿：读者刚点完"开卷"，停半秒不会被察觉，
+    // 但正好够第一张内页图下完；之后的翻页仍按 260ms，绝不拖慢连续阅读。
+    var waitMax = idx === 0 ? 600 : 260;
+    var t0 = Date.now();
+    (function tick() {
+      if (imgReady(t.img) || Date.now() - t0 >= waitMax) {
+        gateOpen = true;
+        Flip.go(dir);
+        if (queuedDir) {
+          var q = queuedDir; queuedDir = 0;
+          setTimeout(function () { go(q); }, 0);
+        }
+      } else {
+        setTimeout(tick, 50);
+      }
+    })();
   }
 
   function jump(i) {
