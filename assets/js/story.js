@@ -20,7 +20,6 @@
   var dimEl   = document.getElementById('flip-dim');
   var castEl  = document.getElementById('cast');
   var spineEl = document.getElementById('spine');
-  var stageEl = document.getElementById('stage');
   var edgeLeftEl  = document.getElementById('edge-left');
   var edgeRightEl = document.getElementById('edge-right');
   var dotsEl  = document.getElementById('dots');

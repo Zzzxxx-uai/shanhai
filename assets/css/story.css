@@ -260,7 +260,6 @@ button{font-family:var(--font)}
 .flip .page__fig img{filter:brightness(1.035) saturate(1.15) contrast(1.02)}
 .flip .page *{animation:none!important;transition:none!important}
 .book.is-grab{cursor:grabbing;user-select:none;-webkit-user-select:none}
-.book.is-grab .page{border-radius:0 3px 3px 0}
 
 
 /* ---------- 书的厚度：两侧的纸叠 ---------- */
